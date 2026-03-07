@@ -1,6 +1,6 @@
 Check whether the port is free and the database connectivity have right database and credentials.
  - Changes can be done on:
-   >Port, Database, Username(for MYSQL), Passoword(for MYSQL): spms\src\main\resources\application.properties
+   >> Port, Database, Username(for MYSQL), Passoword(for MYSQL): spms\src\main\resources\application.properties
 
 
 To run, use : ".\mvnw.cmd spring-boot:run"
