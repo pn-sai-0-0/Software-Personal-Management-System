@@ -1,7 +1,7 @@
 Check whether the port is free and the database connectivity have right database and credentials.
 In your VS install:
  - Extention Pack for Java(by Microsoft)
- - Liver Server
+ - Live Server
  - Spring boot extention pack(by VMware)
  - Git Extention pack
 
