@@ -4152,3 +4152,19 @@ body {
     text-align: center;
     background: var(--bg-secondary);
 }
+
+/* ── Profile body wrapper for manager/hr/admin profile views ── */
+.profile-body { display: flex; flex-direction: column; gap: 1.5rem; }
+.profile-body .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+@media (max-width: 768px) { .profile-body .grid-2 { grid-template-columns: 1fr; } }
+
+/* ── Messaging System ──────────────────────────────────────── */
+.msg-conv-item {
+    padding: 0.65rem 0.75rem;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-bottom: 0.25rem;
+    transition: background 0.15s;
+}
+.msg-conv-item:hover { background: var(--bg-hover, rgba(99,102,241,0.08)); }
+.msg-conv-item.active { background: rgba(99,102,241,0.12); border-left: 3px solid var(--primary); }

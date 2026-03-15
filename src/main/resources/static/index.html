@@ -357,11 +357,11 @@
             <div class="container">
                 <div class="stats-banner-grid-enhanced">
                     <div class="stat-banner-item scroll-reveal-scale">
-                        <span class="stat-banner-value" data-count="10000" data-suffix="+">27</span>
+                        <span class="stat-banner-value" data-count="27" data-suffix="+">27</span>
                         <div class="stat-banner-label">Active Users</div>
                     </div>
                     <div class="stat-banner-item scroll-reveal-scale">
-                        <span class="stat-banner-value" data-count="500" data-suffix="+">1</span>
+                        <span class="stat-banner-value" data-count="1" data-suffix="+">1</span>
                         <div class="stat-banner-label">Company</div>
                     </div>
                     <div class="stat-banner-item scroll-reveal-scale">
@@ -530,7 +530,7 @@
     <main class="main-content">
         <div class="top-bar">
             <div class="top-bar-left"><button class="btn-icon hamburger" onclick="toggleSidebar()">☰</button><div class="breadcrumb"><span>Dashboard</span><span>/</span><span id="currentView">Overview</span></div></div>
-            <div class="top-bar-right"><button class="btn-icon notif-btn" onclick="openNotifications()">🔔<span class="notification-badge" id="empNotifBadge">3</span></button><button class="theme-toggle" onclick="toggleTheme()"><span class="theme-icon">🌙</span></button></div>
+            <div class="top-bar-right"><button class="btn-icon notif-btn" onclick="openMessaging()" title="Messages" style="position:relative">✉️<span class="notification-badge" id="empMsgBadge" style="display:none">0</span></button><button class="btn-icon notif-btn" onclick="openNotifications()">🔔<span class="notification-badge" id="empNotifBadge">3</span></button><button class="theme-toggle" onclick="toggleTheme()"><span class="theme-icon">🌙</span></button></div>
         </div>
         <div id="employee-overview" class="view-content">
             <div class="page-header"><div><h1>Welcome Back, <span id="empName">John Doe</span></h1><p>Here's your project activity for today</p></div></div>
@@ -578,7 +578,7 @@
             </div>
         </div>
         <div id="employee-profile" class="view-content hidden">
-            <div class="page-header"><div><h1>My Profile</h1><p>Your personal information and skills</p></div><button class="btn btn-secondary" onclick="showToast('Edit mode — connect to backend for persistence')">✏️ Edit Profile</button></div>
+            <div class="page-header"><div><h1>My Profile</h1><p>Your personal information and skills</p></div></div>
             <div class="grid-2">
                 <div class="card card-modern profile-card-center">
                     <div class="profile-avatar-large" id="profileAvatar">JD</div>
@@ -586,20 +586,20 @@
                     <p class="profile-id" id="profileId">EMP-2024-001</p>
                     <p class="profile-department" id="profileDept">Engineering Department</p>
                     <div class="profile-stats">
-                        <div class="profile-stat"><div class="profile-stat-value">92%</div><div class="profile-stat-label">Performance</div></div>
-                        <div class="profile-stat"><div class="profile-stat-value">5</div><div class="profile-stat-label">Projects</div></div>
-                        <div class="profile-stat"><div class="profile-stat-value">12</div><div class="profile-stat-label">Tasks Done</div></div>
+                        <div class="profile-stat"><div class="profile-stat-value" id="profilePerformance">—</div><div class="profile-stat-label">Performance</div></div>
+                        <div class="profile-stat"><div class="profile-stat-value" id="profileProjects">—</div><div class="profile-stat-label">Projects</div></div>
+                        <div class="profile-stat"><div class="profile-stat-value" id="profileTasks">—</div><div class="profile-stat-label">Tasks Done</div></div>
                     </div>
                 </div>
                 <div class="card card-modern">
                     <h3 class="card-title" style="margin-bottom:1rem">📋 Personal Information</h3>
                     <div class="info-grid">
-                        <div class="info-item"><label>Full Name</label><p id="profileNameInfo">John Doe</p></div>
-                        <div class="info-item"><label>Employee ID</label><p id="profileId2">EMP-001</p></div>
-                        <div class="info-item"><label>Department</label><p id="profileDeptInfo">Engineering</p></div>
-                        <div class="info-item"><label>Email</label><p id="profileEmail"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="22484d4a4c0c464d476251524f510c414d4f">[email&#160;protected]</a></p></div>
-                        <div class="info-item"><label>Join Date</label><p id="profileJoinDate">January 15, 2024</p></div>
-                        <div class="info-item"><label>Role</label><p>Senior Developer</p></div>
+                        <div class="info-item"><label>Full Name</label><p id="profileNameInfo">—</p></div>
+                        <div class="info-item"><label>Employee ID</label><p id="profileId2">—</p></div>
+                        <div class="info-item"><label>Department</label><p id="profileDeptInfo">—</p></div>
+                        <div class="info-item"><label>Email</label><p id="profileEmail">—</p></div>
+                        <div class="info-item"><label>Join Date</label><p id="profileJoinDate">—</p></div>
+                        <div class="info-item"><label>Role</label><p id="profileRoleInfo">—</p></div>
                     </div>
                 </div>
             </div>
@@ -608,6 +608,13 @@
                 <div class="skills-container" id="profileSkills">
                     <span class="skill-tag skill-tag-primary">React</span><span class="skill-tag skill-tag-success">Node.js</span><span class="skill-tag skill-tag-warning">Python</span><span class="skill-tag skill-tag-info">Docker</span><span class="skill-tag skill-tag-primary">AWS</span>
                 </div>
+            </div>
+            <div class="card card-modern" id="empPasswordCard">
+                <h3 class="card-title" style="margin-bottom:1rem">🔒 Change Password</h3>
+                <div class="form-group"><label>Current Password</label><input type="password" id="pwCurrent" class="form-control" placeholder="Enter current password"></div>
+                <div class="form-group"><label>New Password</label><input type="password" id="pwNew" class="form-control" placeholder="At least 6 characters"></div>
+                <div class="form-group"><label>Confirm New Password</label><input type="password" id="pwConfirm" class="form-control" placeholder="Repeat new password"></div>
+                <button class="btn btn-primary btn-glow" onclick="changePassword(currentUser?.id)">Update Password 🔒</button>
             </div>
         </div>
     </main>
@@ -625,6 +632,7 @@
             <li onclick="showView('manager','workload',this)"><span class="menu-icon"></span><span>Workload</span></li>
             <li onclick="showView('manager','reports',this)"><span class="menu-icon"></span><span>Project Reports</span></li>
             <li onclick="showView('manager','projects',this)"><span class="menu-icon"></span><span>Projects</span></li>
+            <li onclick="showView('manager','profile',this)"><span class="menu-icon"></span><span>My Profile</span></li>
         </ul>
         <div class="sidebar-footer">
             <div class="sidebar-user"><div class="sidebar-user-avatar" id="mgrSidebarAvatar">SA</div><div class="sidebar-user-info"><div class="sidebar-user-name" id="mgrSidebarName">Sarah Adams</div><div class="sidebar-user-role" id="mgrSidebarRole">Manager</div></div></div>
@@ -634,7 +642,7 @@
     <main class="main-content">
         <div class="top-bar">
             <div class="top-bar-left"><button class="btn-icon hamburger" onclick="toggleSidebar()">☰</button><div class="breadcrumb"><span>Dashboard</span><span>/</span><span id="managerView">Overview</span></div></div>
-            <div class="top-bar-right"><button class="btn-icon notif-btn" onclick="openNotifications()">🔔<span class="notification-badge" id="mgrNotifBadge">5</span></button><button class="theme-toggle" onclick="toggleTheme()"><span class="theme-icon">🌙</span></button></div>
+            <div class="top-bar-right"><button class="btn-icon notif-btn" onclick="openMessaging()" title="Messages" style="position:relative">✉️<span class="notification-badge" id="mgrMsgBadge" style="display:none">0</span></button><button class="btn-icon notif-btn" onclick="openNotifications()">🔔<span class="notification-badge" id="mgrNotifBadge">5</span></button><button class="theme-toggle" onclick="toggleTheme()"><span class="theme-icon">🌙</span></button></div>
         </div>
         <div id="manager-overview" class="view-content">
             <div class="page-header"><div><h1>Welcome, <span id="mgrName">Manager</span> </h1><p>Comprehensive team and project oversight for your department</p></div><div class="page-header-actions"><button class="btn btn-secondary" onclick="exportData('manager-report')">📥 Generate Report</button></div></div>
@@ -685,6 +693,10 @@
             </div>
             <div class="projects-grid" id="managerProjectsGrid"></div>
         </div>
+        <div id="manager-profile" class="view-content hidden">
+            <div class="page-header"><div><h1>My Profile</h1><p>Your personal information, role details and skills</p></div></div>
+            <div class="profile-body"></div>
+        </div>
     </main>
 </div>
 <!-- ==================== HR DASHBOARD ==================== -->
@@ -700,6 +712,7 @@
             <li onclick="showView('hr','assignment',this)"><span class="menu-icon"></span><span>Assignment</span></li>
             <li onclick="showView('hr','employee',this)"><span class="menu-icon"></span><span>Employees</span></li>
             <li onclick="showView('hr','projects',this)"><span class="menu-icon"></span><span>Projects</span></li>
+            <li onclick="showView('hr','profile',this)"><span class="menu-icon"></span><span>My Profile</span></li>
         </ul>
         <div class="sidebar-footer">
             <div class="sidebar-user"><div class="sidebar-user-avatar" id="hrSidebarAvatar">EC</div><div class="sidebar-user-info"><div class="sidebar-user-name" id="hrSidebarName">Emily Chen</div><div class="sidebar-user-role" id="hrSidebarRole">HR Manager</div></div></div>
@@ -709,7 +722,7 @@
     <main class="main-content">
         <div class="top-bar">
             <div class="top-bar-left"><button class="btn-icon hamburger" onclick="toggleSidebar()">☰</button><div class="breadcrumb"><span>Dashboard</span><span>/</span><span id="hrView">Overview</span></div></div>
-            <div class="top-bar-right"><button class="btn-icon notif-btn" onclick="openNotifications()">🔔<span class="notification-badge" id="hrNotifBadge">2</span></button><button class="theme-toggle" onclick="toggleTheme()"><span class="theme-icon">🌙</span></button></div>
+            <div class="top-bar-right"><button class="btn-icon notif-btn" onclick="openMessaging()" title="Messages" style="position:relative">✉️<span class="notification-badge" id="hrMsgBadge" style="display:none">0</span></button><button class="btn-icon notif-btn" onclick="openNotifications()">🔔<span class="notification-badge" id="hrNotifBadge">2</span></button><button class="theme-toggle" onclick="toggleTheme()"><span class="theme-icon">🌙</span></button></div>
         </div>
         <div id="hr-overview" class="view-content">
             <div class="page-header"><div><h1>HR Dashboard — <span id="hrName">HR Manager</span></h1><p>Resource allocation and workforce management overview</p></div><button class="btn btn-secondary" onclick="exportData('hr-report')">📥 Export</button></div>
@@ -779,6 +792,10 @@
             </div>
             <div class="projects-grid" id="hrProjectsGrid"></div>
         </div>
+        <div id="hr-profile" class="view-content hidden">
+            <div class="page-header"><div><h1>My Profile</h1><p>Your personal information, HR role details and skills</p></div></div>
+            <div class="profile-body"></div>
+        </div>
     </main>
 </div>
 <!-- ==================== ADMIN DASHBOARD ==================== -->
@@ -796,6 +813,7 @@
             <li onclick="showView('admin','audit',this)"><span class="menu-icon"></span><span>Audit Log</span></li>
             <li onclick="showView('admin','health',this)"><span class="menu-icon"></span><span>System Health</span></li>
             <li onclick="showView('admin','settings',this)"><span class="menu-icon"></span><span>Settings</span></li>
+            <li onclick="showView('admin','profile',this)"><span class="menu-icon"></span><span>My Profile</span></li>
         </ul>
         <div class="sidebar-footer">
             <div class="sidebar-user"><div class="sidebar-user-avatar" id="adminSidebarAvatar">DM</div><div class="sidebar-user-info"><div class="sidebar-user-name" id="adminSidebarName">David Martinez</div><div class="sidebar-user-role" id="adminSidebarRole">Admin</div></div></div>
@@ -805,7 +823,7 @@
     <main class="main-content">
         <div class="top-bar">
             <div class="top-bar-left"><button class="btn-icon hamburger" onclick="toggleSidebar()">☰</button><div class="breadcrumb"><span>Dashboard</span><span>/</span><span id="adminView">Overview</span></div></div>
-            <div class="top-bar-right"><button class="btn-icon notif-btn" onclick="openNotifications()">🔔<span class="notification-badge" id="adminNotifBadge">2</span></button><button class="theme-toggle" onclick="toggleTheme()"><span class="theme-icon">🌙</span></button></div>
+            <div class="top-bar-right"><button class="btn-icon notif-btn" onclick="openMessaging()" title="Messages" style="position:relative">✉️<span class="notification-badge" id="adminMsgBadge" style="display:none">0</span></button><button class="btn-icon notif-btn" onclick="openNotifications()">🔔<span class="notification-badge" id="adminNotifBadge">2</span></button><button class="theme-toggle" onclick="toggleTheme()"><span class="theme-icon">🌙</span></button></div>
         </div>
         <div id="admin-overview" class="view-content">
             <div class="page-header"><div><h1>System Administration — <span id="adminName">Admin</span></h1><p>System-wide management, monitoring, and configuration</p></div><button class="btn btn-secondary" onclick="exportData('admin-report')">📥 System Report</button></div>
@@ -912,6 +930,27 @@
                 <div style="margin-top:1.5rem"><button type="submit" class="btn btn-primary btn-glow">💾 Save All Settings</button></div>
             </form>
         </div>
+        <div id="admin-profile" class="view-content hidden">
+            <div class="page-header">
+                <div><h1>My Profile</h1><p>Your administrator account details and system access information</p></div>
+                <button class="btn btn-primary btn-glow" onclick="openAdminEditProfileModal()">✏️ Edit Profile</button>
+            </div>
+            <div class="profile-body"></div>
+        </div>
+
+<!-- Admin Edit Profile Modal -->
+<div id="adminEditProfileModal" class="modal">
+  <div class="modal-backdrop" onclick="closeModal('adminEditProfileModal')"></div>
+  <div class="modal-content modal-modern" style="max-width:480px">
+    <button class="modal-close" onclick="closeModal('adminEditProfileModal')">×</button>
+    <div class="modal-header-modern"><h2>✏️ Edit My Profile</h2><p>Update your administrator information</p></div>
+    <div class="form-group"><label>Full Name</label><input type="text" id="adminEditName" class="form-control"></div>
+    <div class="form-group"><label>Email</label><input type="email" id="adminEditEmail" class="form-control"></div>
+    <div class="form-group"><label>Department</label><input type="text" id="adminEditDept" class="form-control"></div>
+    <div class="form-group"><label>Skills (comma-separated)</label><input type="text" id="adminEditSkills" class="form-control" placeholder="e.g. Leadership, Strategy, SQL"></div>
+    <button class="btn btn-primary btn-block btn-glow" onclick="saveAdminProfile()">Save Changes ✓</button>
+  </div>
+</div>
     </main>
 </div>
 <!-- ==================== MODALS ==================== -->
@@ -923,10 +962,14 @@
         <form onsubmit="handleAddUser(event)">
             <div class="form-group"><label>Full Name *</label><input type="text" id="newUserName" placeholder="e.g. John Smith" required></div>
             <div class="form-group"><label>Email *</label><input type="email" id="newUserEmail" placeholder="john@company.com" required></div>
-            <div class="form-group"><label>Username *</label><input type="text" id="newUserUsername" placeholder="username"></div>
-            <div class="form-group"><label>Password *</label><input type="password" id="newUserPassword" placeholder="Set initial password"></div>
+            <div class="form-group"><label>Username</label><input type="text" id="newUserUsername" placeholder="username (defaults to email prefix)"></div>
+            <div class="form-group"><label>Password</label><input type="password" id="newUserPassword" placeholder="Set initial password (default: password)"></div>
             <div class="form-group"><label>Role *</label><select id="newUserRole" required><option value="">Select role</option><option value="employee">Employee</option><option value="manager">Manager</option><option value="hr">HR</option><option value="admin">Admin</option></select></div>
             <div class="form-group"><label>Department *</label><input type="text" id="newUserDept" placeholder="e.g. Engineering" required></div>
+            <div class="form-group"><label>Join Date</label><input type="date" id="newUserJoinDate"></div>
+            <div class="form-group"><label>Hours Per Week</label><input type="number" id="newUserHours" placeholder="40" min="1" max="80" value="40"></div>
+            <div class="form-group"><label>Performance Score (0–100)</label><input type="number" id="newUserPerformance" placeholder="80" min="0" max="100" value="80"></div>
+            <div class="form-group"><label>Skills (comma-separated)</label><input type="text" id="newUserSkills" placeholder="e.g. React, Node.js, Python"></div>
             <button type="submit" class="btn btn-primary btn-block btn-glow">Create User ✓</button>
         </form>
     </div>
@@ -942,6 +985,10 @@
             <div class="form-group"><label>Email</label><input type="email" id="editUserEmail" required></div>
             <div class="form-group"><label>Role</label><select id="editUserRole" required><option value="employee">Employee</option><option value="manager">Manager</option><option value="hr">HR</option><option value="admin">Admin</option></select></div>
             <div class="form-group"><label>Department</label><input type="text" id="editUserDept" required></div>
+            <div class="form-group"><label>Performance Score (0–100)</label><input type="number" id="editUserPerformance" min="0" max="100" placeholder="Leave blank to keep current"></div>
+            <div class="form-group"><label>Hours Per Week</label><input type="number" id="editUserHours" min="1" max="80" placeholder="Leave blank to keep current"></div>
+            <div class="form-group"><label>Skills (comma-separated)</label><input type="text" id="editUserSkills" placeholder="e.g. React, Node.js, Python"></div>
+            <div class="form-group"><label>New Password</label><input type="password" id="editUserPassword" placeholder="Leave blank to keep current password"></div>
             <button type="submit" class="btn btn-primary btn-block btn-glow">Save Changes ✓</button>
         </form>
     </div>
@@ -954,8 +1001,9 @@
         <form onsubmit="handleAddProject(event)">
             <div class="form-group"><label>Project Name *</label><input type="text" id="newProjectName" placeholder="Enter project name" required></div>
             <div class="form-group"><label>Description</label><textarea id="newProjectDesc" rows="3" placeholder="Brief description..."></textarea></div>
-            <div class="form-group"><label>Department</label><select id="newProjectDept"><option value="">Select department</option><option value="Engineering">Engineering</option><option value="Design">Design</option><option value="QA">QA</option><option value="Product">Product</option><option value="DevOps">DevOps</option></select></div>
+            <div class="form-group"><label>Department</label><select id="newProjectDept"><option value="">Select department</option></select></div>
             <div class="form-group"><label>Priority</label><select id="newProjectPriority"><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option><option value="low">Low</option></select></div>
+            <div class="form-group"><label>Urgency</label><select id="newProjectUrgency"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select></div>
             <div class="form-group"><label>Start Date</label><input type="date" id="newProjectStart"></div>
             <div class="form-group"><label>Deadline *</label><input type="date" id="newProjectEnd" required></div>
             <button type="submit" class="btn btn-primary btn-block btn-glow">Create Project ✓</button>
@@ -973,6 +1021,8 @@
             <div class="form-group"><label>Description</label><textarea id="editProjectDesc" rows="3"></textarea></div>
             <div class="form-group"><label>Status</label><select id="editProjectStatus"><option value="active">Active</option><option value="unassigned">Unassigned</option><option value="completed">Completed</option><option value="delayed">Delayed</option><option value="archived">Archived</option></select></div>
             <div class="form-group"><label>Priority</label><select id="editProjectPriority"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></div>
+            <div class="form-group"><label>Urgency</label><select id="editProjectUrgency"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
+            <div class="form-group"><label>Department</label><select id="editProjectDept"><option value="">Select department</option></select></div>
             <div class="form-group"><label>Deadline</label><input type="date" id="editProjectDeadline"></div>
             <button type="submit" class="btn btn-primary btn-block btn-glow">Save Changes ✓</button>
         </form>
@@ -1004,8 +1054,12 @@
 async function addNewDept() {
     const name = document.getElementById('newDeptName')?.value?.trim();
     if (!name) { showToast('Enter a department name ❌', 'error'); return; }
+    // Generate a unique code from the name (e.g. "Research & Dev" → "RD-001")
+    const code = name.replace(/[^a-zA-Z0-9]/g,' ').trim().split(/\s+/)
+        .map(w=>w[0]?.toUpperCase()||'').join('').substring(0,6)
+        + '-' + String(Date.now()).slice(-3);
     try {
-        await api('POST', '/departments', { name, requestorId: currentUser?.id, requestorName: currentUser?.name });
+        await api('POST', '/departments', { name, code, description: name });
         document.getElementById('newDeptName').value = '';
         // Refresh dept list from DB and repopulate all dropdowns
         const deptRes = await api('GET', '/departments').catch(()=>({ data: allDepartments }));
@@ -1020,10 +1074,92 @@ async function addNewDept() {
     }
 }
 function addNewSkill() {
-    const name = document.getElementById('newSkillName')?.value?.trim();
+    const input = document.getElementById('newSkillName');
+    const name = input?.value?.trim();
     if (!name) { showToast('Enter a skill name ❌', 'error'); return; }
-    document.getElementById('newSkillName').value = '';
-    showToast(`Skill "${name}" noted — add to employee profiles via User Management ✓`);
+    // Add to a global skill registry (used by profile skill tags)
+    if (!window.allSkills) window.allSkills = [];
+    if (window.allSkills.includes(name)) { showToast(`Skill "${name}" already exists ⚠️`, 'error'); return; }
+    window.allSkills.push(name);
+    // Try to persist via API (POST /skills if endpoint exists, silent fail otherwise)
+    api('POST', '/skills', { name, addedBy: currentUser?.id, addedByName: currentUser?.name })
+        .catch(()=>{}); // non-fatal — skill is noted locally
+    input.value = '';
+    // Show a visual confirmation with the skill chip
+    showToast(`Skill "${name}" added to registry ✓`);
+    // Render the current skills list below the input
+    let listEl = document.getElementById('adminSkillsList');
+    if (!listEl) {
+        listEl = document.createElement('div');
+        listEl.id = 'adminSkillsList';
+        listEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:0.75rem';
+        input.parentElement.parentElement.appendChild(listEl);
+    }
+    const tag = document.createElement('span');
+    tag.className = 'skill-tag skill-tag-primary';
+    tag.textContent = name;
+    listEl.appendChild(tag);
 }
 
 // Tab switching is handled by script.js (window.switchFeaturedTab)
+
+</script>
+
+<!-- ==================== GLOBAL MESSAGING MODAL ==================== -->
+<div id="messagingModal" class="modal" style="z-index:9999">
+  <div class="modal-backdrop" onclick="closeModal('messagingModal')"></div>
+  <div class="modal-content modal-modern" style="max-width:860px;width:95vw;height:80vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:1.25rem 1.5rem;border-bottom:1px solid var(--border);flex-shrink:0">
+      <div><h2 style="margin:0;font-size:1.2rem">✉️ Messages</h2><p style="margin:0;font-size:0.8rem;color:var(--text-secondary)" id="msgModalSubtitle">Your inbox &amp; conversations</p></div>
+      <div style="display:flex;gap:0.5rem;align-items:center">
+        <button class="btn btn-primary btn-glow" style="padding:0.4rem 0.9rem;font-size:0.82rem" onclick="openComposeMessage()">✏️ Compose</button>
+        <button class="modal-close" style="position:static;font-size:1.4rem;background:none;border:none;cursor:pointer;color:var(--text-secondary)" onclick="closeModal('messagingModal')">×</button>
+      </div>
+    </div>
+    <div style="display:flex;flex:1;min-height:0">
+      <!-- Sidebar: conversation list -->
+      <div style="width:260px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;background:var(--bg-secondary)" id="msgConvList">
+        <div style="padding:0.75rem 1rem;font-size:0.75rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em">Conversations</div>
+        <div id="msgConvListBody" style="padding:0 0.5rem 1rem"></div>
+      </div>
+      <!-- Main: thread view -->
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+        <div id="msgThreadArea" style="flex:1;overflow-y:auto;padding:1.25rem">
+          <div style="text-align:center;color:var(--text-secondary);padding-top:3rem">
+            <div style="font-size:2.5rem;margin-bottom:0.5rem">✉️</div>
+            <p>Select a conversation or compose a new message</p>
+          </div>
+        </div>
+        <div id="msgReplyBar" style="display:none;padding:0.75rem 1rem;border-top:1px solid var(--border);flex-shrink:0;background:var(--bg-secondary)">
+          <div style="display:flex;gap:0.5rem">
+            <textarea id="msgReplyText" rows="2" style="flex:1;resize:none;background:var(--input-bg,var(--bg-card));border:1px solid var(--border);border-radius:8px;padding:0.6rem;color:var(--text-primary);font-size:0.875rem" placeholder="Write a reply…"></textarea>
+            <button class="btn btn-primary btn-glow" style="align-self:flex-end;padding:0.5rem 1rem" onclick="sendMsgReply()">Send ➤</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Compose new message modal -->
+<div id="composeModal" class="modal" style="z-index:10000">
+  <div class="modal-backdrop" onclick="closeModal('composeModal')"></div>
+  <div class="modal-content modal-modern" style="max-width:500px">
+    <button class="modal-close" onclick="closeModal('composeModal')">×</button>
+    <div class="modal-header-modern"><h2>✏️ New Message</h2><p>Send a message to a colleague</p></div>
+    <div class="form-group">
+      <label>To</label>
+      <input type="text" id="composeToSearch" class="form-control" placeholder="Search by name, role or ID…" style="margin-bottom:0.4rem">
+      <select id="composeTo" class="form-control" size="4" style="border-radius:8px"></select>
+    </div>
+    <div class="form-group">
+      <label>Subject</label>
+      <input type="text" id="composeSubject" class="form-control" placeholder="e.g. Project update, Question…">
+    </div>
+    <div class="form-group">
+      <label>Message</label>
+      <textarea id="composeBody" rows="5" class="form-control" style="resize:vertical" placeholder="Write your message…"></textarea>
+    </div>
+    <button class="btn btn-primary btn-block btn-glow" onclick="sendComposedMessage()">Send Message 📤</button>
+  </div>
+</div>

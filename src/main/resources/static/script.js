@@ -1,4 +1,4 @@
-const API = 'http://localhost:9090/api';
+const API = 'https://spms-backend-hbad.onrender.com/api';
 
 // ── Application State ──────────────────────────────────────
 let currentUser = null;
@@ -10,6 +10,7 @@ let sidebarCollapsed = false;
 let allProjects = [];
 let allEmployees = [];
 let allUsers = [];
+let allDepartments = [];
 let notificationsList = [];
 let charts = {};
 let currentEmployeeActivities = []; // all daily_activities for the logged-in employee
@@ -166,39 +167,70 @@ async function handleLogin(event) {
     if (!username || !password || !role) { showToast('Please fill in all fields ❌', 'error'); return; }
     const btn = event.target.querySelector('button[type="submit"]');
     if (btn) { btn.textContent = 'Signing in…'; btn.disabled = true; }
+
+    // Show "waking up" message after 3 seconds if no response yet (Render free tier cold start)
+    let wakeupToastShown = false;
+    const wakeupTimer = setTimeout(() => {
+        wakeupToastShown = true;
+        showToast('Backend is waking up on Render… please wait ⏳', 'info');
+    }, 3000);
+
     try {
         const res = await api('POST', '/auth/login', { username, password, role });
-        if (res.success && res.data) {
+        clearTimeout(wakeupTimer);
+
+        // res.success=false means wrong credentials (HTTP 200 with error body)
+        if (!res.success) {
+            showToast(res.message || 'Invalid credentials — check username, password and role ❌', 'error');
+        } else if (res.success && res.data) {
             const user = res.data;
             if (user.role !== role) {
-                showToast('Role mismatch — please select the correct role.', 'error');
+                showToast('Role mismatch — please select the correct role for this account.', 'error');
             } else {
                 currentUser = user;
                 closeLoginModal();
-                await initDashboard(role, user);
+                initDashboard(role, user); // non-blocking — dashboard shows immediately
                 showToast(`Welcome back, ${user.name}! 👋`, 'success');
             }
         } else {
-            showToast(res.message || 'Invalid credentials ❌', 'error');
+            showToast('Unexpected response from server. Please try again.', 'error');
         }
     } catch (e) {
-        showToast('Cannot reach backend. Start Spring Boot on port 9090. ❌', 'error');
+        clearTimeout(wakeupTimer);
+        // Network error (backend unreachable, CORS, etc.)
+        showToast('Cannot reach the server. Check your internet connection or wait for the backend to wake up. 🔄', 'error');
     }
     if (btn) { btn.textContent = 'Sign In'; btn.disabled = false; }
 }
 
 async function initDashboard(role, user) {
+    // Show the dashboard IMMEDIATELY — don't wait for API calls
     document.getElementById('landingPage').classList.add('hidden');
     const dashMap = { employee:'employeeDashboard', manager:'managerDashboard', hr:'hrDashboard', admin:'adminDashboard' };
     const dash = document.getElementById(dashMap[role]);
     if (!dash) return;
     dash.classList.remove('hidden');
     updateSidebarUser(role, user);
-    await loadNotifications();
-    if (role === 'employee') await initEmployeeDashboard(user);
-    else if (role === 'manager') await initManagerDashboard(user);
-    else if (role === 'hr') await initHRDashboard(user);
-    else if (role === 'admin') await initAdminDashboard(user);
+
+    // Load everything in parallel — non-blocking so login feels instant
+    loadNotifications().catch(() => {});
+
+    // Init the role dashboard (loads data, renders stats)
+    try {
+        if (role === 'employee')      await initEmployeeDashboard(user);
+        else if (role === 'manager')  await initManagerDashboard(user);
+        else if (role === 'hr')       await initHRDashboard(user);
+        else if (role === 'admin')    await initAdminDashboard(user);
+    } catch(e) { console.warn('Dashboard init error:', e.message); }
+
+    // Update landing page counter in background (non-blocking)
+    api('GET', '/users').then(r => {
+        if (r?.data) {
+            allUsers = r.data;
+            const el = document.getElementById('counterUsers');
+            if (el) el.textContent = r.data.length;
+        }
+    }).catch(() => {});
 }
 
 function updateSidebarUser(role, user) {
@@ -215,25 +247,29 @@ function updateSidebarUser(role, user) {
 
 async function logout() {
     if (currentUser) {
-        // Record session duration for employee/manager activity tracking
-        const sessionStart = localStorage.getItem('spms_session_start');
+        const sessionStart  = localStorage.getItem('spms_session_start');
         const sessionUserId = localStorage.getItem('spms_session_user');
+        let durationHours   = 0;
         if (sessionStart && sessionUserId && parseInt(sessionUserId) === currentUser.id) {
             const durationMs = Date.now() - new Date(sessionStart).getTime();
-            const durationHours = parseFloat((durationMs / 3600000).toFixed(2));
-            const today = new Date().toISOString().split('T')[0];
-            // Try to update daily_activities with session hours
+            durationHours    = parseFloat((durationMs / 3600000).toFixed(2));
+            const today      = new Date().toISOString().split('T')[0];
             try {
                 await api('PUT', `/users/${currentUser.id}/activity`, {
                     activityDate: today,
-                    hoursWorked: durationHours,
-                    action: 'logout'
+                    hoursWorked:  durationHours,
+                    action:       'logout'
                 });
             } catch { /* endpoint may not exist — logout still tracked by /auth/logout */ }
         }
         localStorage.removeItem('spms_session_start');
         localStorage.removeItem('spms_session_user');
-        try { await api('POST', '/auth/logout', { userId: currentUser.id, hoursWorked: parseFloat(((Date.now() - (sessionStart ? new Date(sessionStart).getTime() : Date.now())) / 3600000).toFixed(2)) }); } catch {}
+        try {
+            await api('POST', '/auth/logout', {
+                userId:      currentUser.id,
+                hoursWorked: durationHours
+            });
+        } catch {}
     }
     currentUser = null;
     allUsers = []; allProjects = []; allDepartments = [];
@@ -264,32 +300,66 @@ function showView(role, view, element) {
     if (bc) bc.textContent = viewTitles[view] || view;
     if (role === 'employee' && view === 'projects')     renderEmployeeProjects();
     else if (role === 'employee' && view === 'performance') initPerformanceCharts();
+    else if (role === 'employee' && view === 'profile')  renderEmployeeProfile(currentUser);
     else if (role === 'manager' && view === 'overview') initManagerOverview();
     else if (role === 'manager' && view === 'workload') renderManagerWorkload();
     else if (role === 'manager' && view === 'reports')  renderManagerReports();
     else if (role === 'manager' && view === 'projects') renderManagerProjects();
+    else if (role === 'manager' && view === 'profile')  renderManagerProfile();
     else if (role === 'hr' && view === 'assignment')    renderAssignmentProjects();
     else if (role === 'hr' && view === 'employee')      renderEmployeeTracking();
     else if (role === 'hr' && view === 'projects')      renderHRProjects();
+    else if (role === 'hr' && view === 'profile')       renderHRProfile();
     else if (role === 'admin' && view === 'users')      renderUserManagement();
     else if (role === 'admin' && view === 'projects')   renderAdminProjects();
     else if (role === 'admin' && view === 'audit')      renderAuditLog();
     else if (role === 'admin' && view === 'health')     renderSystemHealth();
     else if (role === 'admin' && view === 'settings')   loadAdminSettings();
+    else if (role === 'admin' && view === 'profile')    renderAdminProfile();
 }
 
 // ── Utility Helpers ──────────────────────────────────────────
 function daysUntil(dateStr) { return Math.ceil((new Date(dateStr) - new Date()) / 86400000); }
+
+/** Parse skills from any format the backend might return */
+function parseSkills(raw) {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw.filter(Boolean);
+    if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        if (trimmed.startsWith('[')) {
+            try { return JSON.parse(trimmed).filter(Boolean); } catch {}
+        }
+        // comma-separated plain string
+        return trimmed.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    return [];
+}
+function parseUTCDate(ts) {
+    if (!ts) return null;
+    // Spring Boot's LocalDateTime serialises as "2026-03-14T10:30:00" — no Z/offset.
+    // JS treats bare ISO strings as LOCAL time, so IST users see times 5:30h behind.
+    // Append 'Z' to force UTC interpretation; JS then converts to the user's local time.
+    const s = String(ts);
+    const normalised = (s.includes('Z') || s.includes('+') || s.includes('-', 10))
+        ? s          // already has timezone info — leave alone
+        : s + 'Z';   // no timezone → treat as UTC
+    const d = new Date(normalised);
+    return isNaN(d) ? null : d;
+}
+
 function formatTime(ts) {
     if (!ts) return '';
-    const d = new Date(ts);
-    if (isNaN(d)) return ts;
-    const diff = (Date.now() - d) / 1000;
-    if (diff < 60)   return 'just now';
-    if (diff < 3600) return `${Math.floor(diff/60)} min ago`;
-    if (diff < 86400)return `${Math.floor(diff/3600)} hours ago`;
-    if (diff < 604800)return `${Math.floor(diff/86400)} days ago`;
-    return d.toLocaleDateString();
+    const d = parseUTCDate(ts);
+    if (!d) return String(ts);
+    const diff = (Date.now() - d.getTime()) / 1000;
+    if (diff < 0)     return 'just now';          // clock skew edge case
+    if (diff < 60)    return 'just now';
+    if (diff < 3600)  return `${Math.floor(diff / 60)} min ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} hr ago`;
+    if (diff < 604800)return `${Math.floor(diff / 86400)} days ago`;
+    // Older than a week — show full localised date + time
+    return d.toLocaleString(undefined, { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
 }
 function initials(name) { return (name||'').split(' ').map(w=>w[0]||'').join('').substring(0,3).toUpperCase(); }
 
@@ -363,7 +433,8 @@ async function initEmployeeDashboard(user) {
     const actsToUse  = monthActs.length > 0 ? monthActs : currentEmployeeActivities.slice(0, 20);
     const computedTasks  = actsToUse.reduce((s,a)=>s+(parseInt(a.tasksDone||a.tasks_done)||0),0);
     const computedHours  = Math.round(actsToUse.reduce((s,a)=>s+(parseFloat(a.hoursWorked||a.hours_worked)||0),0));
-    const pendingReviews = notificationsList.filter(n=>n.type==='review'&&!n.is_read).length || 3;
+    // Only count pending reviews from actual unread notifications, never use a fallback number
+    const pendingReviews = notificationsList.filter(n=>n.type==='review'&&!n.is_read).length;
 
     // ── Try backend stats — handle BOTH camelCase and snake_case field names ──
     // (Jackson SNAKE_CASE strategy: activeProjects→active_projects, tasksCompleted→tasks_completed)
@@ -385,7 +456,8 @@ async function initEmployeeDashboard(user) {
         pendingReviews:  (bPending!= null && bPending> 0) ? bPending: pendingReviews,
         hoursThisMonth:  (bHours  != null && bHours  > 0) ? bHours  : computedHours,
         monthActivities: monthActs.length > 0 ? monthActs : actsToUse,
-        allActivities:   currentEmployeeActivities
+        allActivities:   currentEmployeeActivities,
+        hasActivityData: currentEmployeeActivities.length > 0
     };
 
     renderEmployeeOverview(user, allProjects, empDashStats);
@@ -472,9 +544,9 @@ async function renderRecentActivitiesFromDB() {
                 if (!seen.has(key)) { seen.add(key); acts.push(a); }
             });
         } else {
-            // Fallback: get all activities
-            const r = await api('GET', '/activities', { limit: 30 });
-            acts = r.data || [];
+            // New user with no projects — show empty state, do NOT fetch all activities
+            container.innerHTML = '<p style="color:var(--text-secondary);padding:1rem 0">No recent activities yet — you\'ll see updates here once you\'re assigned to a project.</p>';
+            return;
         }
 
         // Sort newest-first, take top 8
@@ -512,28 +584,37 @@ function renderEmployeeProfile(user) {
     const u = user || currentUser;
     if (!u) return;
     const el = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
+    const roleLabel = u.role ? (u.role.charAt(0).toUpperCase()+u.role.slice(1)) : 'Employee';
+    // Profile card (left column)
     el('profileName',     u.name);
     el('profileId',       u.employeeId || u.employee_id || '');
     el('profileDept',     u.departmentName || u.department_name || '');
+    // Personal information grid (right column)
+    el('profileNameInfo', u.name);
+    el('profileId2',      u.employeeId || u.employee_id || '');
+    el('profileDeptInfo', u.departmentName || u.department_name || '');
     el('profileEmail',    u.email || '');
     el('profileJoinDate', u.joinDate || u.join_date || '');
-    el('profileRole',     u.role ? (u.role.charAt(0).toUpperCase()+u.role.slice(1)) : '');
+    el('profileRole',     roleLabel);
+    el('profileRoleInfo', roleLabel);
     const av = document.getElementById('profileAvatar');
     if (av) av.textContent = u.avatarInitials || u.avatar_initials || initials(u.name);
-    // Stats
+    // Profile stat cards — only show real data; display N/A for brand-new users
+    const hasActivity = (currentEmployeeActivities && currentEmployeeActivities.length > 0)
+        || allProjects.some(p => p.assignedUsers && p.assignedUsers.some(a => a.id == u.id || a.userId == u.id));
     const pa = document.getElementById('profilePerformance');
     const pp = document.getElementById('profileProjects');
     const pt = document.getElementById('profileTasks');
-    if (pa) pa.textContent = (u.performanceScore || u.performance_score || 0) + '%';
-    if (pp) pp.textContent = u.projectCount || 0;
-    if (pt) pt.textContent = u.tasksCompleted || 0;
+    if (pa) pa.textContent = hasActivity ? (u.performanceScore || u.performance_score || 0) + '%' : 'N/A';
+    if (pp) pp.textContent = u.projectCount || allProjects.filter(p=>p.status==='active').length || 0;
+    if (pt) pt.textContent = u.tasksCompleted || u.tasks_completed || 0;
     // Skills
     const sc = document.getElementById('profileSkills');
     if (sc) {
         let skills = u.skills;
-        if (typeof skills === 'string') try { skills = JSON.parse(skills); } catch { skills = []; }
+        skills = parseSkills(skills);
         const colors = ['primary','success','warning','info','secondary'];
-        sc.innerHTML = (skills||[]).map((s,i)=>`<span class="skill-tag skill-tag-${colors[i%colors.length]}">${s}</span>`).join('');
+        sc.innerHTML = (skills||[]).map((s,i)=>`<span class="skill-tag skill-tag-${colors[i%colors.length]}">${s}</span>`).join('') || '<span style="color:var(--text-secondary)">No skills listed</span>';
     }
 }
 
@@ -628,7 +709,26 @@ async function openProjectDetail(id, role) {
                 <div class="detail-section">
                     <h4>💬 Comments & Instructions</h4>
                     <div id="commentsList${p.id}">
-                        ${comments.map(c=>`<div class="comment-item"><div class="comment-author">${c.authorName||c.author_name||'User'} <span class="comment-role">(${c.authorRole||c.author_role||''})</span></div><div class="comment-text">${c.commentText||c.comment_text}</div><div class="comment-time">${formatTime(c.createdAt||c.created_at)}</div></div>`).join('') || '<p style="color:var(--text-secondary);font-size:0.85rem">No comments yet</p>'}
+                        ${comments.map(c => {
+                            const isOwn = currentUser && (c.authorId == currentUser.id || c.author_id == currentUser.id || c.authorName === currentUser.name || c.author_name === currentUser.name);
+                            // Admin can delete anyone's comment; everyone else only their own
+                            const canDelComment = role === 'admin' || isOwn;
+                            return `<div class="comment-item" id="cmt-${c.id}">
+                                <div class="comment-author">${c.authorName||c.author_name||'User'} <span class="comment-role">(${c.authorRole||c.author_role||''})</span></div>
+                                <div class="comment-text">${c.commentText||c.comment_text}</div>
+                                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.35rem">
+                                    <div style="display:flex;gap:0.4rem;align-items:center">
+                                        <div class="comment-time">${formatTime(c.createdAt||c.created_at)}</div>
+                                        <button class="btn btn-sm btn-secondary" style="padding:0.15rem 0.45rem;font-size:0.7rem" onclick="toggleReplyBox(${c.id})">↩ Reply</button>
+                                    </div>
+                                    ${canDelComment ? `<button class="btn btn-sm btn-danger" style="padding:0.2rem 0.5rem;font-size:0.72rem;line-height:1" onclick="deleteProjectComment(${c.id},${p.id},'${role}')">🗑️ Delete</button>` : ''}
+                                </div>
+                                <div id="reply-box-${c.id}" style="display:none;flex-direction:column;gap:0.4rem;margin-top:0.5rem;padding:0.5rem;background:var(--bg-secondary);border-radius:6px">
+                                    <textarea id="reply-input-${c.id}" rows="2" style="resize:none;background:var(--bg-card,var(--bg-primary));border:1px solid var(--border);border-radius:6px;padding:0.4rem;color:var(--text-primary);font-size:0.8rem" placeholder="Write your reply…"></textarea>
+                                    <button class="btn btn-sm btn-primary" style="align-self:flex-end" onclick="replyToComment(${c.id},${p.id},'${role}')">Post Reply</button>
+                                </div>
+                            </div>`;
+                        }).join('') || '<p style="color:var(--text-secondary);font-size:0.85rem">No comments yet</p>'}
                     </div>
                     ${canComment ? `<div class="comment-form"><textarea id="commentInput${p.id}" placeholder="Add a comment or instruction…" rows="3"></textarea><button class="btn btn-sm btn-primary" onclick="addProjectComment(${p.id},'${role}')">Post Comment</button></div>` : ''}
                 </div>
@@ -834,7 +934,24 @@ async function addProjectComment(projectId, role) {
     }
 }
 
-// ── Performance Charts ───────────────────────────────────────
+// ── Delete a comment (manager/HR can delete their own comments) + log action ──
+async function deleteProjectComment(commentId, projectId, role) {
+    if (!confirm('Delete this comment? This cannot be undone.')) return;
+    const row = document.getElementById(`cmt-${commentId}`);
+    if (row) row.style.opacity = '0.4';
+    try {
+        // Based on build manual, the only comment endpoint is POST /api/comments
+        // DELETE is not documented - try /comments/{id} as the most likely path
+        await api('DELETE', `/comments/${commentId}`)
+            .catch(() => api('DELETE', `/projects/${projectId}/comments/${commentId}`));
+        showToast('Comment deleted ✓');
+        await openProjectDetail(projectId, role);
+    } catch(e) {
+        if (row) row.style.opacity = '1';
+        showToast(`Failed to delete comment: ${e.message}`, 'error');
+    }
+}
+
 function initPerformanceCharts() {
     updatePerformanceChart();
 }
@@ -852,7 +969,9 @@ async function updatePerformanceChart() {
         const totalCommits  = data.totalCommits  ?? commits.reduce((s,c)=>s+c,0);
         const totalTasks    = data.totalTasks    ?? tasks.reduce((s,t)=>s+t,0);
         const avgHrs        = data.avgHoursPerDay?? (hours.length ? (hours.reduce((s,h)=>s+h,0)/hours.length).toFixed(1) : 0);
-        const productivity  = data.productivityScore ?? Math.min(100,Math.round(totalCommits/Math.max(1,hours.length)*8+70));
+        // Productivity: only compute if user has real commit data; 0 for brand-new users
+        const hasRealData   = totalCommits > 0 || totalTasks > 0 || parseFloat(avgHrs) > 0;
+        const productivity  = data.productivityScore ?? (hasRealData ? Math.min(100, Math.round(totalCommits/Math.max(1,hours.length)*8+70)) : 0);
         const setEl = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
         setEl('totalCommits',     totalCommits);
         setEl('avgHours',         avgHrs);
@@ -936,10 +1055,12 @@ function populateDeptFilter(selectId, departments, useAllLabel) {
 async function recordManagerDailyLogin(user) {
     if (!user) return;
     const today = new Date().toISOString().split('T')[0];
-    // Record in audit_log via the activities endpoint (project history with managerId)
-    // Also write a daily_activities row for the manager if the backend supports it
+    // Store session start in localStorage for logout duration calculation
+    if (!localStorage.getItem('spms_session_start')) {
+        localStorage.setItem('spms_session_start', new Date().toISOString());
+        localStorage.setItem('spms_session_user',  String(user.id));
+    }
     try {
-        // The /activities endpoint reads project_history; we use a direct activities insert if available
         await api('POST', '/activities', {
             userId: user.id,
             personName: user.name,
@@ -1244,9 +1365,14 @@ async function confirmManagerAssign() {
         closeModal('tempAssignModal');
         window._selectedAssignEmps = [];
         showToast(`Assigned ${empIds.length} employee(s) to project ✓`);
-        // Refresh projects
+        // Refresh projects from DB to get the real updated status
         const projRes = await api('GET', '/projects');
         allProjects = projRes.data || [];
+        // Also optimistically update the local project status if API didn't change it
+        const localProj = allProjects.find(p=>p.id===projId);
+        if (localProj && localProj.status === 'unassigned') {
+            localProj.status = 'active';
+        }
         renderManagerWorkload();
         renderManagerProjects();
     } catch (e) {
@@ -1391,7 +1517,9 @@ async function sendMessage(employeeId) {
     const msg = document.getElementById('msgContent')?.value?.trim();
     if (!msg) { showToast('Please enter a message', 'error'); return; }
     try {
-        await api('POST', '/messages', { toId: employeeId, fromId: currentUser?.id, subject: `Message from ${currentUser?.name||'Manager'}`, body: msg });
+        await _postMessage(currentUser.id, employeeId, `Message from ${currentUser?.name||'Manager'}`, msg);
+        // Cache sent message
+        _sentMessages.push({ fromId: currentUser.id, toId: employeeId, from_id: currentUser.id, to_id: employeeId, body: msg, subject: `Message from ${currentUser?.name||'Manager'}`, is_read: true, _localTime: new Date().toISOString() });
         closeModal('tempMsgModal');
         showToast('Message sent successfully 📨');
     } catch (e) {
@@ -1457,7 +1585,7 @@ async function viewEmployeeDetail(id, role) {
         : 0;
     const wc = (emp.workload||0)>=75?'danger':(emp.workload||0)>=50?'warning':'success';
     let skills = emp.skills;
-    if (typeof skills === 'string') try { skills = JSON.parse(skills); } catch { skills = []; }
+    skills = parseSkills(skills);
 
     // Compute project count from allProjects if not in emp
     const empProjectCount = emp.projectCount ?? emp.project_count
@@ -1547,6 +1675,11 @@ async function initHRDashboard(user) {
 
     // Record HR login activity in DB
     await recordHRAction('login', `HR ${user.name} logged into the portal`);
+    // Store session start in localStorage for logout duration calculation
+    if (!localStorage.getItem('spms_session_start')) {
+        localStorage.setItem('spms_session_start', new Date().toISOString());
+        localStorage.setItem('spms_session_user',  String(user.id));
+    }
 }
 
 function renderHRStats() {
@@ -1640,18 +1773,20 @@ async function renderHRActivities() {
 // Backend may return `departments[]`, `departmentName`, or `department_name`
 function getProjectDepts(p) {
     if (Array.isArray(p.departments) && p.departments.length)
-        return p.departments.map(d => d.name || d);
-    const dn = p.departmentName || p.department_name;
-    return dn ? [dn] : [];
+        return p.departments.map(d => d.name || d).filter(Boolean);
+    const dn = p.departmentName || p.department_name || '';
+    // department_name may be comma-separated (our HR multi-dept storage)
+    return dn ? dn.split(',').map(s=>s.trim()).filter(Boolean) : [];
 }
 
 async function renderAssignmentProjects() {
     const container = document.getElementById('assignmentProjectsGrid');
     if (!container) return;
     setLoading('assignmentProjectsGrid', 'Loading projects…');
-    // Reload fresh from DB
+    // Reload fresh from DB and update global allProjects
     const res = await api('GET', '/projects').catch(()=>({ data:[] }));
     const projects = res.data || [];
+    allProjects = projects; // ← keep global in sync so selectAssignmentProject can find them
     // Show all non-completed/archived projects so HR can assign or manage
     let filtered = projects.filter(p=>p.status!=='completed'&&p.status!=='archived');
     const search  = document.getElementById('assignProjectSearch')?.value?.toLowerCase() || '';
@@ -1750,17 +1885,26 @@ function backToProjectSelection() {
 async function confirmDeptAssignment() {
     if (!_hrSelectedProject) { showToast('No project selected ⚠️', 'error'); return; }
     if (!_selectedDeptNames.length) { showToast('Please select at least one department ⚠️', 'error'); return; }
+
+    // Append new departments to existing ones (comma-separated in single column)
+    const existing = (_hrSelectedProject.department_name || _hrSelectedProject.departmentName || '')
+        .split(',').map(s=>s.trim()).filter(Boolean);
+    const merged = [...new Set([...existing, ..._selectedDeptNames])].join(', ');
+
     try {
-        await api('POST', `/projects/${_hrSelectedProject.id}/departments`, {
-            departments: _selectedDeptNames,
-            assignedBy: currentUser?.id,
-            assignedByName: currentUser?.name
+        const sp = _hrSelectedProject;
+        await api('PUT', `/projects/${sp.id}`, {
+            name:           sp.name,
+            status:         'active',
+            priority:       sp.priority || 'medium',
+            departmentName: merged,
+            description:    sp.description || sp.name || '',
+            requestorId:    currentUser?.id,
+            requestorName:  currentUser?.name
         });
-        showToast(`Project assigned to ${_selectedDeptNames.length} department(s) ✓`);
-        // Record HR assignment activity in DB
-        await recordHRAction('assign', `Assigned project to departments: ${_selectedDeptNames.join(', ')}`, _hrSelectedProject.id);
+        showToast(`Project assigned to: ${merged} ✓`);
         const projRes = await api('GET', '/projects');
-        allProjects = projRes.data || [];
+        allProjects = projRes.data || allProjects;
         backToProjectSelection();
         renderAssignmentProjects();
     } catch (e) {
@@ -1781,8 +1925,17 @@ async function openHRManageProjectModal(projectId) {
     const existing = document.getElementById('hrManageProjectModal');
     if (existing) existing.parentNode?.removeChild(existing);
 
+    // Always fetch fresh from DB so we have latest department assignments
     const projRes = await api('GET', `/projects/${projectId}`).catch(()=>null);
-    const project = projRes?.data || allProjects.find(p=>p.id===projectId);
+    let project = projRes?.data;
+    if (!project) {
+        // Fallback: reload all projects and find
+        try {
+            const allRes = await api('GET', '/projects');
+            if (allRes?.data) allProjects = allRes.data;
+        } catch {}
+        project = allProjects.find(p=>p.id===projectId);
+    }
     if (!project) { showToast('Could not load project', 'error'); return; }
 
     const assignedDepts  = getProjectDepts(project);
@@ -1859,10 +2012,24 @@ async function openHRManageProjectModal(projectId) {
 
 async function hrRemoveDeptFromProject(projectId, deptName) {
     try {
-        await api('DELETE', `/projects/${projectId}/departments`, { department: deptName, requestedBy: currentUser?.id });
+        const proj = allProjects.find(p => parseInt(p.id) === parseInt(projectId)) || {};
+        const existing = (proj?.department_name || proj?.departmentName || '')
+            .split(',').map(s => s.trim()).filter(Boolean);
+        const remaining = existing.filter(d => d !== deptName);
+        const newDept = remaining.join(', ');
+        const newStatus = remaining.length ? 'active' : 'unassigned';
+        await api('PUT', `/projects/${projectId}`, {
+            name:           proj.name,
+            status:         newStatus,
+            priority:       proj.priority || 'medium',
+            departmentName: newDept,
+            description:    proj.description || proj.name || '',
+            requestorId:    currentUser?.id,
+            requestorName:  currentUser?.name
+        });
         showToast(`${deptName} removed ✓`);
         const projRes = await api('GET', '/projects');
-        allProjects = projRes.data || [];
+        allProjects = projRes.data || allProjects;
         closeModal('hrManageProjectModal');
         await openHRManageProjectModal(projectId);
     } catch (e) {
@@ -1874,10 +2041,25 @@ async function hrAddDeptToProject(projectId) {
     const deptName = document.getElementById('hrAddDeptSelect')?.value;
     if (!deptName) { showToast('Please select a department ⚠️', 'error'); return; }
     try {
-        await api('POST', `/projects/${projectId}/departments`, { departments: [deptName], assignedBy: currentUser?.id });
+        const proj = allProjects.find(p => parseInt(p.id) === parseInt(projectId)) || {};
+        const existing = (proj?.department_name || proj?.departmentName || '')
+            .split(',').map(s => s.trim()).filter(Boolean);
+        if (existing.includes(deptName)) { showToast(`${deptName} already assigned`, 'error'); return; }
+        const merged = [...existing, deptName].join(', ');
+        // Send full project payload to avoid @NotNull validation failures on PUT
+        // ProjectService.update reads camelCase Map keys (not SNAKE_CASE)
+        await api('PUT', `/projects/${projectId}`, {
+            name:           proj.name,
+            status:         'active',
+            priority:       proj.priority || 'medium',
+            departmentName: merged,
+            description:    proj.description || proj.name || '',
+            requestorId:    currentUser?.id,
+            requestorName:  currentUser?.name
+        });
         showToast(`${deptName} added ✓`);
         const projRes = await api('GET', '/projects');
-        allProjects = projRes.data || [];
+        allProjects = projRes.data || allProjects;
         closeModal('hrManageProjectModal');
         await openHRManageProjectModal(projectId);
     } catch (e) {
@@ -2023,6 +2205,11 @@ async function initAdminDashboard(user) {
             activityDate: new Date().toISOString().split('T')[0], type: 'login'
         });
     } catch {}
+    // Store session start in localStorage for logout duration calculation
+    if (!localStorage.getItem('spms_session_start')) {
+        localStorage.setItem('spms_session_start', new Date().toISOString());
+        localStorage.setItem('spms_session_user',  String(user.id));
+    }
 }
 
 function renderAdminStats() {
@@ -2146,34 +2333,67 @@ async function toggleUserStatus(userId, checkbox) {
 function openAddUserModal() { document.getElementById('addUserModal')?.classList.add('active'); }
 
 async function openEditUserModal(userId) {
+    // GET /users/{id} returns { data: { user: {...}, dailyActivities: [...] } }
     const res = await api('GET', `/users/${userId}`).catch(()=>null);
-    const user = res?.data || allUsers.find(e=>e.id===userId);
-    if (!user) return;
+    // Extract nested user object — fall back to allUsers list
+    const user = res?.data?.user || res?.data || allUsers.find(e => parseInt(e.id) === parseInt(userId));
+    if (!user) { showToast('Could not load user data', 'error'); return; }
+
     const modal = document.getElementById('editUserModal');
     if (!modal) return;
-    const sv = (id,v) => { const el=document.getElementById(id); if(el) el.value=v||''; };
-    sv('editUserId',    user.id);
-    sv('editUserName',  user.name);
-    sv('editUserEmail', user.email);
-    sv('editUserRole',  user.role);
-    sv('editUserDept',  user.departmentName||user.department_name||'');
+
+    // Use fallbacks for all fields so existing values always show
+    const sv = (id, v) => { const el = document.getElementById(id); if (el) el.value = (v != null && v !== undefined) ? String(v) : ''; };
+    sv('editUserId',          user.id);
+    sv('editUserName',        user.name || '');
+    sv('editUserEmail',       user.email || '');
+    // role: use the value from API (snake_case serialised, so field is "role")
+    const roleEl = document.getElementById('editUserRole');
+    if (roleEl) roleEl.value = user.role || 'employee';
+    sv('editUserDept',        user.departmentName || user.department_name || '');
+    // performance_score and hours_per_week come as snake_case from the API
+    sv('editUserPerformance', user.performance_score ?? user.performanceScore ?? '');
+    sv('editUserHours',       user.hours_per_week   ?? user.hoursPerWeek   ?? '');
+    sv('editUserPassword',    ''); // always blank for security
+    // skills stored as JSON string in DB, parse to comma-separated for display
+    sv('editUserSkills', parseSkills(user.skills).join(', '));
+
     modal.classList.add('active');
 }
 
 async function handleAddUser(event) {
     event.preventDefault();
-    const name     = document.getElementById('newUserName')?.value?.trim();
-    const email    = document.getElementById('newUserEmail')?.value?.trim();
-    const role     = document.getElementById('newUserRole')?.value;
-    const dept     = document.getElementById('newUserDept')?.value?.trim();
-    const username = document.getElementById('newUserUsername')?.value?.trim() || email?.split('@')[0];
-    const password = document.getElementById('newUserPassword')?.value || 'password';
+    const name         = document.getElementById('newUserName')?.value?.trim();
+    const email        = document.getElementById('newUserEmail')?.value?.trim();
+    const role         = document.getElementById('newUserRole')?.value;
+    const dept         = document.getElementById('newUserDept')?.value?.trim();
+    const username     = document.getElementById('newUserUsername')?.value?.trim() || email?.split('@')[0];
+    const password     = document.getElementById('newUserPassword')?.value || 'password';
+    const joinDate     = document.getElementById('newUserJoinDate')?.value || new Date().toISOString().split('T')[0];
+    const hoursPerWeek = parseInt(document.getElementById('newUserHours')?.value || '40');
+    const perfScore    = parseInt(document.getElementById('newUserPerformance')?.value || '80');
+    const skillsRaw    = document.getElementById('newUserSkills')?.value?.trim() || '';
+    const skills       = skillsRaw ? skillsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
     if (!name || !email || !role || !dept) { showToast('Please fill in all required fields ❌', 'error'); return; }
     try {
-        await api('POST', '/users', { name, email, role, departmentName: dept, username, password, requestorId: currentUser?.id, requestorName: currentUser?.name });
+        await api('POST', '/users', {
+            name, email, role,
+            departmentName:  dept,
+            department_name: dept,
+            username, password,
+            joinDate,
+            join_date:        joinDate,
+            hoursPerWeek,
+            hours_per_week:   hoursPerWeek,
+            performanceScore: perfScore,
+            performance_score: perfScore,
+            skills: skills   // send as array; backend stores as JSON column
+        });
         closeModal('addUserModal');
         // Clear the form fields
-        ['newUserName','newUserEmail','newUserRole','newUserDept','newUserUsername','newUserPassword'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+        ['newUserName','newUserEmail','newUserRole','newUserDept','newUserUsername',
+         'newUserPassword','newUserJoinDate','newUserHours','newUserPerformance','newUserSkills'
+        ].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
         // Refetch fresh from DB
         const fresh = await api('GET', '/users').catch(()=>({ data:allUsers }));
         allUsers = fresh.data || allUsers;
@@ -2187,21 +2407,53 @@ async function handleAddUser(event) {
 
 async function handleEditUser(event) {
     event.preventDefault();
-    const id   = parseInt(document.getElementById('editUserId')?.value);
-    const name = document.getElementById('editUserName')?.value?.trim();
-    const email= document.getElementById('editUserEmail')?.value?.trim();
-    const role = document.getElementById('editUserRole')?.value;
-    const dept = document.getElementById('editUserDept')?.value?.trim();
+    const id       = parseInt(document.getElementById('editUserId')?.value);
+    const name     = document.getElementById('editUserName')?.value?.trim();
+    const email    = document.getElementById('editUserEmail')?.value?.trim();
+    const role     = document.getElementById('editUserRole')?.value;
+    const dept     = document.getElementById('editUserDept')?.value?.trim();
+    const perfRaw  = document.getElementById('editUserPerformance')?.value?.trim();
+    const hoursRaw = document.getElementById('editUserHours')?.value?.trim();
+    const skillsRaw= document.getElementById('editUserSkills')?.value?.trim() || '';
+
+    // Validate before sending (invalid id causes Spring 400 NumberFormatException)
+    if (!id || isNaN(id)) { showToast('Invalid user ID — close and re-open the modal', 'error'); return; }
+    if (!name)             { showToast('Name is required', 'error'); return; }
+    if (!email)            { showToast('Email is required', 'error'); return; }
+    if (!role)             { showToast('Role is required', 'error'); return; }
+
+    // Resolve existing user values (fallbacks for unchanged fields)
+    const ex = allUsers.find(u => parseInt(u.id) === id) || {};
+    const hoursVal = hoursRaw ? parseInt(hoursRaw) : (ex.hours_per_week  ?? ex.hoursPerWeek  ?? 40);
+    const perfVal  = perfRaw  ? parseInt(perfRaw)  : (ex.performance_score ?? ex.performanceScore ?? 80);
+    const deptVal  = dept || ex.department_name || ex.departmentName || '';
+
+    // UserController reads Map<String,Object> with LITERAL camelCase keys
+    const payload = {
+        name,
+        email,
+        role,
+        departmentName:   deptVal,
+        workload:         typeof ex.workload === 'number' ? ex.workload : 0,
+        hoursPerWeek:     hoursVal,
+        performanceScore: perfVal,
+        requestorId:      currentUser?.id,
+        requestorName:    currentUser?.name || 'Admin'
+    };
+
     try {
-        await api('PUT', `/users/${id}`, { name, email, role, departmentName: dept, requestorId: currentUser?.id, requestorName: currentUser?.name });
-        // Refetch fresh from DB to confirm the update is persisted
-        const fresh = await api('GET', '/users').catch(()=>({ data:allUsers }));
+        const res = await api('PUT', `/users/${id}`, payload);
+        // Controller wraps errors in {success:false} with HTTP 200 — check both
+        if (res?.success === false) throw new Error(res.message || 'Update rejected by server');
+
+        // Refresh user list from DB
+        const fresh = await api('GET', '/users').catch(() => ({ data: allUsers }));
         allUsers = fresh.data || allUsers;
         closeModal('editUserModal');
         renderUserManagement();
         renderAdminStats();
-        showToast(`User ${name} updated ✓`);
-    } catch (e) {
+        showToast(`${name} updated ✓`);
+    } catch(e) {
         showToast(`Update failed: ${e.message}`, 'error');
     }
 }
@@ -2241,7 +2493,21 @@ async function renderAdminProjects() {
     if (status !== 'all') projects = projects.filter(p=>p.status===status);
     if (dept   !== 'all') projects = projects.filter(p=>(p.departmentName||p.department_name)===dept);
     const sc = { active:'success', completed:'info', delayed:'danger', unassigned:'warning', archived:'secondary' };
-    container.innerHTML = projects.map(p=>`
+    // Fetch team counts per project from assignments endpoint
+    let teamCounts = {};
+    try {
+        const aRes = await api('GET', '/assignments').catch(()=>null);
+        if (aRes?.data) {
+            aRes.data.forEach(a => {
+                const pid = a.projectId || a.project_id;
+                teamCounts[pid] = (teamCounts[pid] || 0) + 1;
+            });
+        }
+    } catch {}
+    container.innerHTML = projects.map(p => {
+        const teamCount = teamCounts[p.id] ?? (p.team||[]).length;
+        const isArchived = p.status === 'archived';
+        return `
         <tr>
             <td>${p.code}</td>
             <td>${p.name}</td>
@@ -2250,20 +2516,27 @@ async function renderAdminProjects() {
             <td><span class="badge badge-${p.priority==='critical'?'danger':p.priority==='high'?'warning':'info'}">${p.priority}</span></td>
             <td><div class="progress-bar" style="width:80px;display:inline-block"><div class="progress-fill" style="width:${p.progress}%"></div></div> ${p.progress}%</td>
             <td>${p.deadline||'—'}</td>
-            <td>${(p.team||[]).length}</td>
+            <td>${teamCount}</td>
             <td>
                 <div class="action-buttons">
                     <button class="btn btn-sm btn-secondary" onclick="openEditProjectModal(${p.id})" title="Edit">✏️</button>
-                    <button class="btn btn-sm btn-warning"   onclick="archiveProject(${p.id})"       title="Archive">📦</button>
+                    <button class="btn btn-sm btn-warning"   onclick="archiveProject(${p.id})"       title="${isArchived?'Unarchive':'Archive'}">${isArchived?'📤':'📦'}</button>
                     <button class="btn btn-sm btn-danger"    onclick="confirmDeleteProject(${p.id})" title="Delete">🗑️</button>
                 </div>
             </td>
-        </tr>`).join('');
+        </tr>`;
+    }).join('');
     if (!projects.length) container.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:2rem">No projects found</td></tr>';
 }
 
 function filterAdminProjects() { renderAdminProjects(); }
-function openAddProjectModal()  { document.getElementById('addProjectModal')?.classList.add('active'); }
+function openAddProjectModal() {
+    const modal = document.getElementById('addProjectModal');
+    if (!modal) return;
+    // Populate department dropdown from real DB data (replaces hardcoded options)
+    populateDeptFilter('newProjectDept', allDepartments);
+    modal.classList.add('active');
+}
 
 async function openEditProjectModal(id) {
     const proj = allProjects.find(p=>p.id===id);
@@ -2271,31 +2544,33 @@ async function openEditProjectModal(id) {
     const modal = document.getElementById('editProjectModal');
     if (!modal) return;
     const sv = (elId,v) => { const el=document.getElementById(elId); if(el) el.value=v||''; };
-    sv('editProjId',         proj.id);
-    sv('editProjName',       proj.name);
-    sv('editProjCode',       proj.code);
-    sv('editProjStatus',     proj.status);
-    sv('editProjPriority',   proj.priority);
-    sv('editProjUrgency',    proj.urgency);
-    sv('editProjDeadline',   proj.deadline);
-    sv('editProjDept',       proj.departmentName||proj.department_name||'');
-    sv('editProjDescription',proj.description||'');
+    sv('editProjectId',       proj.id);
+    sv('editProjectName',     proj.name);
+    sv('editProjectDesc',     proj.description||'');
+    sv('editProjectStatus',   proj.status);
+    sv('editProjectPriority', proj.priority);
+    sv('editProjectUrgency',  proj.urgency||'medium');
+    sv('editProjectDeadline', proj.deadline);
+    // Populate dept dropdown from real DB data then set current value
+    populateDeptFilter('editProjectDept', allDepartments);
+    sv('editProjectDept', proj.departmentName||proj.department_name||'');
     modal.classList.add('active');
 }
 
 async function handleAddProject(event) {
     event.preventDefault();
-    const name  = document.getElementById('newProjName')?.value?.trim();
-    const dept  = document.getElementById('newProjDept')?.value?.trim();
-    const priority = document.getElementById('newProjPriority')?.value || 'medium';
-    const urgency  = document.getElementById('newProjUrgency')?.value  || 'medium';
-    const deadline = document.getElementById('newProjDeadline')?.value;
-    const desc  = document.getElementById('newProjDescription')?.value?.trim();
-    if (!name || !dept || !deadline) { showToast('Name, dept and deadline are required ❌', 'error'); return; }
+    const name     = document.getElementById('newProjectName')?.value?.trim();
+    const desc     = document.getElementById('newProjectDesc')?.value?.trim();
+    const dept     = document.getElementById('newProjectDept')?.value?.trim();
+    const priority = document.getElementById('newProjectPriority')?.value || 'medium';
+    const urgency  = document.getElementById('newProjectUrgency')?.value  || 'medium';
+    const deadline = document.getElementById('newProjectEnd')?.value;
+    if (!name || !deadline) { showToast('Name and deadline are required ❌', 'error'); return; }
     try {
-        await api('POST', '/projects', { name, departmentName: dept, priority, urgency, deadline, description: desc, requestorId: currentUser?.id, requestorName: currentUser?.name });
+        await api('POST', '/projects', { name, description: desc, departmentName: dept, priority, urgency, deadline, requestorId: currentUser?.id, requestorName: currentUser?.name });
         closeModal('addProjectModal');
-        ['newProjName','newProjDept','newProjDeadline','newProjDescription'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+        ['newProjectName','newProjectDesc','newProjectEnd'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+        const deptSel = document.getElementById('newProjectDept'); if(deptSel) deptSel.selectedIndex=0;
         const fresh = await api('GET', '/projects').catch(()=>({ data:allProjects }));
         allProjects = fresh.data || allProjects;
         renderAdminProjects();
@@ -2308,14 +2583,14 @@ async function handleAddProject(event) {
 
 async function handleEditProject(event) {
     event.preventDefault();
-    const id       = parseInt(document.getElementById('editProjId')?.value);
-    const name     = document.getElementById('editProjName')?.value?.trim();
-    const status   = document.getElementById('editProjStatus')?.value;
-    const priority = document.getElementById('editProjPriority')?.value;
-    const urgency  = document.getElementById('editProjUrgency')?.value;
-    const deadline = document.getElementById('editProjDeadline')?.value;
-    const dept     = document.getElementById('editProjDept')?.value?.trim();
-    const desc     = document.getElementById('editProjDescription')?.value?.trim();
+    const id       = parseInt(document.getElementById('editProjectId')?.value);
+    const name     = document.getElementById('editProjectName')?.value?.trim();
+    const desc     = document.getElementById('editProjectDesc')?.value?.trim();
+    const status   = document.getElementById('editProjectStatus')?.value;
+    const priority = document.getElementById('editProjectPriority')?.value;
+    const urgency  = document.getElementById('editProjectUrgency')?.value;
+    const deadline = document.getElementById('editProjectDeadline')?.value;
+    const dept     = document.getElementById('editProjectDept')?.value?.trim();
     try {
         await api('PUT', `/projects/${id}`, { name, status, priority, urgency, deadline, departmentName: dept, description: desc, requestorId: currentUser?.id, requestorName: currentUser?.name });
         const fresh = await api('GET', '/projects').catch(()=>({ data:allProjects }));
@@ -2332,14 +2607,17 @@ async function handleEditProject(event) {
 async function archiveProject(id) {
     const p = allProjects.find(p=>p.id===id);
     if (!p) return;
-    if (!confirm(`Archive project "${p.name}"? It will be marked as archived in the DB.`)) return;
+    const isArchived = p.status === 'archived';
+    const newStatus  = isArchived ? 'active' : 'archived';
+    const label      = isArchived ? 'Unarchive' : 'Archive';
+    if (!confirm(`${label} project "${p.name}"?`)) return;
     try {
-        await api('PUT', `/projects/${id}`, { status: 'archived', requestorId: currentUser?.id, requestorName: currentUser?.name });
+        await api('PUT', `/projects/${id}`, { status: newStatus, name: p.name, requestorId: currentUser?.id, requestorName: currentUser?.name });
         const fresh = await api('GET', '/projects').catch(()=>({ data:allProjects }));
         allProjects = fresh.data || allProjects;
         renderAdminProjects();
         renderAdminStats();
-        showToast(`Project archived ✓`);
+        showToast(`Project ${label.toLowerCase()}d ✓`);
     } catch (e) {
         showToast(`Failed: ${e.message}`, 'error');
     }
@@ -2502,7 +2780,7 @@ function showStatDetail(role, type) {
             title:'Pending Reviews',
             items: notificationsList.filter(n=>n.type==='review').length
                 ? notificationsList.filter(n=>n.type==='review').map(n=>`<div class="stat-detail-item">⏳ ${n.title}: ${n.message}</div>`)
-                : ['PR #87 — Backend Auth (requested by Mike Johnson)','Wireframes v2 — Design sign-off needed','Security module — Code review for Auth endpoint'].map(t=>`<div class="stat-detail-item">⏳ ${t}</div>`)
+                : ['<div class="stat-detail-item" style="color:var(--text-secondary)">No pending reviews at this time.</div>']
         },
         'employee-hours':            {
             title:'Hours This Month',
@@ -2555,7 +2833,7 @@ function exportEmployeeReport(empId) {
     const e = allUsers.find(u=>u.id===empId);
     if (!e) return;
     let skills = e.skills;
-    if (typeof skills === 'string') try { skills = JSON.parse(skills); } catch { skills = []; }
+    skills = parseSkills(skills);
     const csv = `Employee Report\nName,${e.name}\nID,${e.employeeId||e.employee_id}\nDept,${e.departmentName||e.department_name}\nPerformance,${e.performanceScore||e.performance_score}%\nWorkload,${e.workload}%\n\nSkills\n${(skills||[]).join('\n')}`;
     downloadCSV(csv, `${e.employeeId||e.employee_id}_report.csv`);
     showToast(`${e.name} report exported ✓`);
@@ -2608,7 +2886,9 @@ function showToast(message, type = 'success') {
     const toast = document.getElementById('toast');
     if (!toast) return;
     toast.textContent = message;
-    toast.className = `toast toast-${type} show`;
+    // Map 'info' and 'warning' to supported CSS classes
+    const cls = type === 'info' ? 'success' : type === 'warning' ? 'error' : type;
+    toast.className = `toast toast-${cls} show`;
     clearTimeout(toast._timeout);
     toast._timeout = setTimeout(() => toast.classList.remove('show'), 3500);
 }
@@ -2965,7 +3245,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initTiltCards();
     initSectionScramble();
     initOrbitRings();
-    notificationsList = [...mockNotifications];
+    // notificationsList already initialised as [] at top; loadNotifications() fills it after login
     updateNotifBadges();
     setTimeout(animateCounters, 500);
 });
@@ -3032,6 +3312,281 @@ window.handleAddComment = addProjectComment;
 
 window.toggleAssignEmployee = toggleAssignEmployee;
 window.confirmManagerAssign = confirmManagerAssign;
+window.deleteProjectComment = deleteProjectComment;
+window.renderManagerProfile = renderManagerProfile;
+window.renderHRProfile      = renderHRProfile;
+window.renderAdminProfile   = renderAdminProfile;
+
+// ============================================================
+//  PASSWORD CHANGE (available to all roles from profile)
+// ============================================================
+async function changePassword(userId) {
+    const getVal = id => {
+        const scoped = document.getElementById(`${id}_${userId}`);
+        return (scoped ? scoped.value : document.getElementById(id)?.value) || '';
+    };
+    const cur  = getVal('pwCurrent');
+    const nw   = getVal('pwNew');
+    const conf = getVal('pwConfirm');
+    if (!cur || !nw || !conf) { showToast('Please fill in all fields ⚠️', 'error'); return; }
+    if (nw !== conf)           { showToast('New passwords do not match ⚠️', 'error'); return; }
+    if (nw.length < 6)         { showToast('Password must be at least 6 characters', 'error'); return; }
+
+    // CorsConfig only allows GET, POST, PUT, DELETE, OPTIONS — NO PATCH.
+    // BCrypt: password must be hashed server-side via a dedicated endpoint.
+    // Try all PUT/POST variants (snake_case first since Jackson uses SNAKE_CASE strategy).
+    const u = allUsers.find(x => x.id == userId) || currentUser || {};
+    // ONLY try dedicated password-change endpoints (PUT/POST-only, no PATCH).
+    // DO NOT include PUT /users/{id} as a fallback — it returns 200 but does NOT BCrypt the password,
+    // causing a false "success" where the old password still works.
+    const attempts = [
+        () => api('PUT',  `/users/${userId}/password`,       { current_password: cur, new_password: nw }),
+        () => api('PUT',  `/users/${userId}/password`,       { currentPassword: cur,  newPassword: nw }),
+        () => api('POST', `/users/${userId}/change-password`, { current_password: cur, new_password: nw }),
+        () => api('POST', `/users/${userId}/change-password`, { currentPassword: cur,  newPassword: nw }),
+        () => api('POST', `/auth/change-password`,            { user_id: userId, current_password: cur, new_password: nw }),
+        () => api('POST', `/auth/change-password`,            { userId,           currentPassword: cur, newPassword: nw }),
+    ];
+
+    let success = false, lastErr = '';
+    for (const fn of attempts) {
+        try { await fn(); success = true; break; }
+        catch(e) { lastErr = e.message; }
+    }
+
+    if (success) {
+        ['pwCurrent','pwNew','pwConfirm',
+         `pwCurrent_${userId}`,`pwNew_${userId}`,`pwConfirm_${userId}`
+        ].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        showToast('Password change request sent ✓ — if your backend supports it, log in again with the new password');
+    } else {
+        showToast(`Password change not supported by this backend. Ask your developer to add PUT /users/{id}/password endpoint.`, 'error');
+    }
+}
+window.changePassword = changePassword;
+
+function _passwordCard(userId) {
+    return `
+    <div class="card card-modern" style="margin-top:0">
+        <h3 class="card-title" style="margin-bottom:1rem">🔒 Change Password</h3>
+        <div class="form-group"><label>Current Password</label><input type="password" id="pwCurrent_${userId}" class="form-control" placeholder="Enter current password"></div>
+        <div class="form-group"><label>New Password</label><input type="password" id="pwNew_${userId}" class="form-control" placeholder="At least 6 characters"></div>
+        <div class="form-group"><label>Confirm New Password</label><input type="password" id="pwConfirm_${userId}" class="form-control" placeholder="Repeat new password"></div>
+        <button class="btn btn-primary btn-glow" onclick="changePassword(${userId})">Update Password 🔒</button>
+    </div>`;
+}
+
+// ============================================================
+//  PROFILE PAGES — MANAGER / HR / ADMIN
+// ============================================================
+function renderManagerProfile() {
+    const u = currentUser;
+    if (!u) return;
+    const container = document.getElementById('manager-profile');
+    if (!container) return;
+    // Refresh users from DB so new employees appear
+    api('GET', '/users').then(r => {
+        if (r?.data) allUsers = r.data;
+        _renderManagerProfileContent(container, u);
+    }).catch(()=> _renderManagerProfileContent(container, u));
+}
+function _renderManagerProfileContent(container, u) {
+    const roleLabel = 'Manager';
+    const teamEmps  = allUsers.filter(e=>e.role==='employee');
+    const activeProjects = allProjects.filter(p=>p.status==='active').length;
+    const completedProjects = allProjects.filter(p=>p.status==='completed').length;
+    let skills = u.skills;
+    skills = parseSkills(skills);
+    const colors = ['primary','success','warning','info','secondary'];
+    const skillsHTML = (skills||[]).map((s,i)=>`<span class="skill-tag skill-tag-${colors[i%colors.length]}">${s}</span>`).join('')
+        || '<span style="color:var(--text-secondary)">No skills listed</span>';
+    container.innerHTML = `
+    <div class="page-header"><div><h1>My Profile</h1><p>Your manager account details and team overview</p></div></div>
+    <div class="grid-2">
+        <div class="card card-modern profile-card-center">
+            <div class="profile-avatar-large" style="background:linear-gradient(135deg,#059669,#10B981)">${u.avatarInitials||u.avatar_initials||initials(u.name)}</div>
+            <h2 class="profile-name">${u.name}</h2>
+            <p class="profile-id">${u.employeeId||u.employee_id||'—'}</p>
+            <p class="profile-department">${u.departmentName||u.department_name||'—'}</p>
+            <div class="profile-stats">
+                <div class="profile-stat"><div class="profile-stat-value">${teamEmps.length}</div><div class="profile-stat-label">Team Size</div></div>
+                <div class="profile-stat"><div class="profile-stat-value">${activeProjects}</div><div class="profile-stat-label">Active Projects</div></div>
+                <div class="profile-stat"><div class="profile-stat-value">${completedProjects}</div><div class="profile-stat-label">Completed</div></div>
+            </div>
+        </div>
+        <div class="card card-modern">
+            <h3 class="card-title" style="margin-bottom:1rem">📋 Personal Information</h3>
+            <div class="info-grid">
+                <div class="info-item"><label>Full Name</label><p>${u.name}</p></div>
+                <div class="info-item"><label>Employee ID</label><p>${u.employeeId||u.employee_id||'—'}</p></div>
+                <div class="info-item"><label>Department</label><p>${u.departmentName||u.department_name||'—'}</p></div>
+                <div class="info-item"><label>Email</label><p>${u.email||'—'}</p></div>
+                <div class="info-item"><label>Join Date</label><p>${u.joinDate||u.join_date||'—'}</p></div>
+                <div class="info-item"><label>Role</label><p>${roleLabel}</p></div>
+                <div class="info-item"><label>Hours / Week</label><p>${u.hoursPerWeek||u.hours_per_week||40}h</p></div>
+                <div class="info-item"><label>Status</label><p><span class="badge badge-${u.status==='active'?'success':'danger'}">${u.status||'active'}</span></p></div>
+            </div>
+        </div>
+    </div>
+    <div class="card card-modern" style="margin-top:0">
+        <h3 class="card-title" style="margin-bottom:1rem">🎯 Skills & Expertise</h3>
+        <div class="skills-container">${skillsHTML}</div>
+    </div>
+    <div class="card card-modern" style="margin-top:0">
+        <h3 class="card-title" style="margin-bottom:1rem">👥 Your Team (${teamEmps.length} employees)</h3>
+        <div class="table-wrapper"><table class="data-table">
+            <thead><tr><th>Employee</th><th>Department</th><th>Performance</th><th>Workload</th><th>Status</th></tr></thead>
+            <tbody>${teamEmps.slice(0,10).map(e=>`<tr>
+                <td><div class="emp-cell"><div class="emp-avatar-sm">${e.avatarInitials||initials(e.name)}</div><div><div class="emp-name">${e.name}</div><div class="emp-id">${e.employeeId||e.employee_id||'—'}</div></div></div></td>
+                <td>${e.departmentName||e.department_name||'—'}</td>
+                <td><span class="badge badge-${(e.performanceScore||e.performance_score||0)>=90?'success':(e.performanceScore||e.performance_score||0)>=75?'warning':'danger'}">${e.performanceScore||e.performance_score||0}%</span></td>
+                <td><div style="display:flex;align-items:center;gap:0.5rem"><div class="progress-bar" style="width:80px;flex:none"><div class="progress-fill" style="width:${e.workload||0}%"></div></div><span>${e.workload||0}%</span></div></td>
+                <td><span class="badge badge-${e.status==='active'?'success':'danger'}">${e.status}</span></td>
+            </tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--text-secondary);padding:2rem">No team members found</td></tr>'}</tbody>
+        </table></div>
+    </div>
+    ${_passwordCard(u.id)}`;
+}
+
+function renderHRProfile() {
+    const u = currentUser;
+    if (!u) return;
+    const container = document.getElementById('hr-profile');
+    if (!container) return;
+    const employees = allUsers.filter(e=>e.role==='employee');
+    const managers  = allUsers.filter(e=>e.role==='manager');
+    const deptCount = allDepartments.length;
+    const activeProj = allProjects.filter(p=>p.status==='active').length;
+    let skills = u.skills;
+    skills = parseSkills(skills);
+    const colors = ['primary','success','warning','info','secondary'];
+    const skillsHTML = (skills||[]).map((s,i)=>`<span class="skill-tag skill-tag-${colors[i%colors.length]}">${s}</span>`).join('')
+        || '<span style="color:var(--text-secondary)">No skills listed</span>';
+    container.innerHTML = `
+    <div class="page-header"><div><h1>My Profile</h1><p>Your HR account details and workforce overview</p></div></div>
+    <div class="grid-2">
+        <div class="card card-modern profile-card-center">
+            <div class="profile-avatar-large" style="background:linear-gradient(135deg,#F59E0B,#D97706)">${u.avatarInitials||u.avatar_initials||initials(u.name)}</div>
+            <h2 class="profile-name">${u.name}</h2>
+            <p class="profile-id">${u.employeeId||u.employee_id||'—'}</p>
+            <p class="profile-department">${u.departmentName||u.department_name||'—'}</p>
+            <div class="profile-stats">
+                <div class="profile-stat"><div class="profile-stat-value">${employees.length}</div><div class="profile-stat-label">Employees</div></div>
+                <div class="profile-stat"><div class="profile-stat-value">${deptCount}</div><div class="profile-stat-label">Departments</div></div>
+                <div class="profile-stat"><div class="profile-stat-value">${activeProj}</div><div class="profile-stat-label">Active Projects</div></div>
+            </div>
+        </div>
+        <div class="card card-modern">
+            <h3 class="card-title" style="margin-bottom:1rem">📋 Personal Information</h3>
+            <div class="info-grid">
+                <div class="info-item"><label>Full Name</label><p>${u.name}</p></div>
+                <div class="info-item"><label>Employee ID</label><p>${u.employeeId||u.employee_id||'—'}</p></div>
+                <div class="info-item"><label>Department</label><p>${u.departmentName||u.department_name||'—'}</p></div>
+                <div class="info-item"><label>Email</label><p>${u.email||'—'}</p></div>
+                <div class="info-item"><label>Join Date</label><p>${u.joinDate||u.join_date||'—'}</p></div>
+                <div class="info-item"><label>Role</label><p>HR Manager</p></div>
+                <div class="info-item"><label>Hours / Week</label><p>${u.hoursPerWeek||u.hours_per_week||40}h</p></div>
+                <div class="info-item"><label>Status</label><p><span class="badge badge-${u.status==='active'?'success':'danger'}">${u.status||'active'}</span></p></div>
+            </div>
+        </div>
+    </div>
+    <div class="card card-modern" style="margin-top:0">
+        <h3 class="card-title" style="margin-bottom:1rem">🎯 Skills & Expertise</h3>
+        <div class="skills-container">${skillsHTML}</div>
+    </div>
+    <div class="grid-2" style="margin-top:0">
+        <div class="card card-modern">
+            <h3 class="card-title" style="margin-bottom:1rem">🏢 Departments (${deptCount})</h3>
+            <div>${allDepartments.map(d=>{
+                const count = employees.filter(e=>(e.departmentName||e.department_name)===d.name).length;
+                return `<div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border)"><span>🏢 ${d.name||d}</span><span class="badge badge-info">${count} emp</span></div>`;
+            }).join('')||'<p style="color:var(--text-secondary)">No departments</p>'}</div>
+        </div>
+        <div class="card card-modern">
+            <h3 class="card-title" style="margin-bottom:1rem">👔 Managers (${managers.length})</h3>
+            <div>${managers.map(m=>`
+                <div class="emp-cell" style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+                    <div class="emp-avatar-sm" style="background:linear-gradient(135deg,#059669,#10B981)">${m.avatarInitials||initials(m.name)}</div>
+                    <div><div class="emp-name">${m.name}</div><div class="emp-id">${m.departmentName||m.department_name||'—'}</div></div>
+                </div>`).join('')||'<p style="color:var(--text-secondary)">No managers</p>'}
+            </div>
+        </div>
+    </div>
+    ${_passwordCard(u.id)}`;
+}
+
+function renderAdminProfile() {
+    const u = currentUser;
+    if (!u) return;
+    const container = document.getElementById('admin-profile');
+    if (!container) return;
+    const totalUsers  = allUsers.length;
+    const totalProjs  = allProjects.length;
+    const deptCount   = allDepartments.length;
+    const admins      = allUsers.filter(e=>e.role==='admin');
+    let skills = u.skills;
+    skills = parseSkills(skills);
+    const colors = ['primary','success','warning','info','secondary'];
+    const skillsHTML = (skills||[]).map((s,i)=>`<span class="skill-tag skill-tag-${colors[i%colors.length]}">${s}</span>`).join('')
+        || '<span style="color:var(--text-secondary)">No skills listed</span>';
+    container.innerHTML = `
+    <div class="page-header"><div><h1>My Profile</h1><p>Your administrator account details and system overview</p></div></div>
+    <div class="grid-2">
+        <div class="card card-modern profile-card-center">
+            <div class="profile-avatar-large" style="background:linear-gradient(135deg,#EF4444,#DC2626)">${u.avatarInitials||u.avatar_initials||initials(u.name)}</div>
+            <h2 class="profile-name">${u.name}</h2>
+            <p class="profile-id">${u.employeeId||u.employee_id||'—'}</p>
+            <p class="profile-department">${u.departmentName||u.department_name||'—'}</p>
+            <div class="profile-stats">
+                <div class="profile-stat"><div class="profile-stat-value">${totalUsers}</div><div class="profile-stat-label">Total Users</div></div>
+                <div class="profile-stat"><div class="profile-stat-value">${totalProjs}</div><div class="profile-stat-label">Projects</div></div>
+                <div class="profile-stat"><div class="profile-stat-value">${deptCount}</div><div class="profile-stat-label">Departments</div></div>
+            </div>
+        </div>
+        <div class="card card-modern">
+            <h3 class="card-title" style="margin-bottom:1rem">📋 Personal Information</h3>
+            <div class="info-grid">
+                <div class="info-item"><label>Full Name</label><p>${u.name}</p></div>
+                <div class="info-item"><label>Employee ID</label><p>${u.employeeId||u.employee_id||'—'}</p></div>
+                <div class="info-item"><label>Department</label><p>${u.departmentName||u.department_name||'—'}</p></div>
+                <div class="info-item"><label>Email</label><p>${u.email||'—'}</p></div>
+                <div class="info-item"><label>Join Date</label><p>${u.joinDate||u.join_date||'—'}</p></div>
+                <div class="info-item"><label>Role</label><p>System Administrator</p></div>
+                <div class="info-item"><label>Hours / Week</label><p>${u.hoursPerWeek||u.hours_per_week||40}h</p></div>
+                <div class="info-item"><label>Access Level</label><p><span class="badge badge-danger">Full Access</span></p></div>
+            </div>
+        </div>
+    </div>
+    <div class="card card-modern" style="margin-top:0">
+        <h3 class="card-title" style="margin-bottom:1rem">🎯 Skills & Expertise</h3>
+        <div class="skills-container">${skillsHTML}</div>
+    </div>
+    <div class="card card-modern" style="margin-top:0">
+        <h3 class="card-title" style="margin-bottom:1rem">📊 System Overview</h3>
+        <div class="stats-grid stats-grid-4" style="margin:0">
+            ${['employee','manager','hr','admin'].map(role=>{
+                const count = allUsers.filter(u=>u.role===role).length;
+                const badge = role==='admin'?'danger':role==='manager'?'primary':role==='hr'?'warning':'info';
+                return `<div class="stat-card stat-card-animated stat-${badge==='info'?'primary':badge}" style="cursor:default"><div class="stat-icon">${role==='employee'?'👤':role==='manager'?'👔':role==='hr'?'🏢':'🔑'}</div><div class="stat-content"><div class="stat-value">${count}</div><div class="stat-label">${role.charAt(0).toUpperCase()+role.slice(1)}${count!==1?'s':''}</div></div></div>`;
+            }).join('')}
+        </div>
+    </div>
+    <div class="card card-modern" style="margin-top:0">
+        <h3 class="card-title" style="margin-bottom:1rem">🔑 All Administrators</h3>
+        <div class="table-wrapper"><table class="data-table">
+            <thead><tr><th>Admin</th><th>Email</th><th>Department</th><th>Last Login</th><th>Status</th></tr></thead>
+            <tbody>${admins.map(a=>`<tr>
+                <td><div class="emp-cell"><div class="emp-avatar-sm" style="background:linear-gradient(135deg,#EF4444,#DC2626)">${a.avatarInitials||initials(a.name)}</div><div><div class="emp-name">${a.name}</div><div class="emp-id">${a.employeeId||a.employee_id||'—'}</div></div></div></td>
+                <td>${a.email||'—'}</td>
+                <td>${a.departmentName||a.department_name||'—'}</td>
+                <td>${formatTime(a.lastLogin||a.last_login)||'Never'}</td>
+                <td><span class="badge badge-${a.status==='active'?'success':'danger'}">${a.status}</span></td>
+            </tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--text-secondary)">No admin data</td></tr>'}</tbody>
+        </table></div>
+    </div>
+    ${_passwordCard(u.id)}`;
+}
+
 
 async function loadProjectsFromDB() {
     try { const r = await api('GET','/projects'); allProjects = r.data||[]; renderManagerProjects&&renderManagerProjects(); } catch(e){console.warn(e);}
@@ -3040,9 +3595,394 @@ async function loadEmployeesFromDB() {
     try { const r = await api('GET','/users'); allUsers = r.data||[]; } catch(e){console.warn(e);}
 }
 
+// ============================================================
+//  MESSAGING SYSTEM
+//  Rules:
+//   - Employee  → can message their Manager + HR
+//   - Manager   → can message anyone
+//   - HR        → can message anyone
+//   - Admin     → can message anyone
+// ============================================================
+
+let _msgCurrentThread = null; // { partnerId, partnerName }
+let _sentMessages = []; // local cache of messages sent in this session
+
+function _getAllowedRecipients() {
+    const me = currentUser;
+    if (!me) return [];
+    const role = me.role;
+    if (role === 'admin' || role === 'manager' || role === 'hr') {
+        // Can message everyone except themselves
+        return allUsers.filter(u => u.id !== me.id);
+    }
+    if (role === 'employee') {
+        // Can message managers + HR only
+        return allUsers.filter(u => u.id !== me.id && (u.role === 'manager' || u.role === 'hr' || u.role === 'admin'));
+    }
+    return [];
+}
+
+async function openMessaging() {
+    const modal = document.getElementById('messagingModal');
+    if (!modal) return;
+    modal.classList.add('active');
+    await loadConversations();
+}
+window.openMessaging = openMessaging;
+
+async function loadConversations() {
+    const bodyEl = document.getElementById('msgConvListBody');
+    if (!bodyEl) return;
+    bodyEl.innerHTML = '<div style="padding:1rem;color:var(--text-secondary);font-size:0.8rem">Loading…</div>';
+
+    if (!allUsers.length) {
+        try { const r = await api('GET','/users'); allUsers = r.data || []; } catch {}
+    }
+    const myId = parseInt(currentUser.id);
+    const resolveUser = id => allUsers.find(u => parseInt(u.id) === parseInt(id));
+
+    try {
+        // GET /messages?userId=X returns ONLY received messages (WHERE to_id=X)
+        let received = [];
+        try {
+            const r = await api('GET', `/messages?userId=${myId}`);
+            received = r?.data || [];
+        } catch {}
+
+        // Merge with locally cached sent messages from this session
+        const allMsgs = [...received, ..._sentMessages];
+        // Deduplicate by id (sent messages that are also returned by server)
+        const seen = new Set();
+        const msgs = allMsgs.filter(m => {
+            const key = m.id || `${m.fromId||m.from_id}-${m.toId||m.to_id}-${m.created_at||Date.now()}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+
+        const convMap = {};
+        msgs.forEach(m => {
+            const fid = parseInt(m.from_id ?? m.fromId ?? 0);
+            const tid = parseInt(m.to_id   ?? m.toId   ?? 0);
+            const partnerId = (fid === myId) ? tid : fid;
+            if (!partnerId) return;
+            const pu = resolveUser(partnerId);
+            const partnerName = pu?.name || `User #${partnerId}`;
+            if (!convMap[partnerId]) convMap[partnerId] = { partnerId, partnerName, msgs: [], unread: 0 };
+            convMap[partnerId].msgs.push(m);
+            // Only count as unread if sent TO me and not read
+            if (!m.is_read && !m.isRead && tid === myId) convMap[partnerId].unread++;
+        });
+
+        const convs = Object.values(convMap).sort((a, b) => {
+            const ta = new Date(a.msgs[a.msgs.length-1]?.created_at || 0);
+            const tb = new Date(b.msgs[b.msgs.length-1]?.created_at || 0);
+            return tb - ta;
+        });
+
+        const totalUnread = convs.reduce((s, c) => s + c.unread, 0);
+        ['empMsgBadge','mgrMsgBadge','hrMsgBadge','adminMsgBadge'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) { el.textContent = totalUnread; el.style.display = totalUnread ? 'flex' : 'none'; }
+        });
+
+        if (!convs.length) {
+            bodyEl.innerHTML = '<div style="padding:1rem;color:var(--text-secondary);font-size:0.8rem;text-align:center">No messages yet.<br>Compose one to get started!</div>';
+            return;
+        }
+
+        bodyEl.innerHTML = convs.map(c => {
+            const last = c.msgs[c.msgs.length - 1];
+            const preview = (last?.body || '').substring(0, 45) + ((last?.body||'').length > 45 ? '…' : '');
+            const isActive = _msgCurrentThread?.partnerId == c.partnerId;
+            const safeName = (c.partnerName||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+            return `<div class="msg-conv-item${isActive ? ' active' : ''}" data-partner-id="${c.partnerId}" onclick="openThread(${c.partnerId},'${safeName}')">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                    <div style="font-weight:${c.unread?700:500};font-size:0.875rem">${c.partnerName}</div>
+                    ${c.unread ? `<span class="badge badge-primary" style="font-size:0.65rem;padding:0.1rem 0.4rem">${c.unread}</span>` : ''}
+                </div>
+                <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:0.15rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${preview||'No messages yet'}</div>
+            </div>`;
+        }).join('');
+    } catch(e) {
+        bodyEl.innerHTML = `<div style="padding:1rem;color:var(--text-secondary);font-size:0.8rem">Could not load: ${e.message}</div>`;
+    }
+}
+window.loadConversations = loadConversations;
+
+async function openThread(partnerId, partnerName) {
+    _msgCurrentThread = { partnerId: parseInt(partnerId), partnerName };
+    const threadArea = document.getElementById('msgThreadArea');
+    const replyBar   = document.getElementById('msgReplyBar');
+    const subtitle   = document.getElementById('msgModalSubtitle');
+    if (!threadArea) return;
+
+    // Resolve real partner name from allUsers
+    const partnerUser = allUsers.find(u => parseInt(u.id) === parseInt(partnerId));
+    if (partnerUser?.name) {
+        partnerName = partnerUser.name;
+        _msgCurrentThread.partnerName = partnerName;
+    }
+    if (subtitle) subtitle.textContent = `Conversation with ${partnerName}`;
+    threadArea.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-secondary)">Loading…</div>';
+    if (replyBar) replyBar.style.display = 'flex';
+
+    document.querySelectorAll('.msg-conv-item').forEach(el => {
+        el.classList.toggle('active', parseInt(el.dataset.partnerId) === parseInt(partnerId));
+    });
+
+    try {
+        const myId  = parseInt(currentUser.id);
+        const pid   = parseInt(partnerId);
+
+        // Fetch received messages for current user
+        let received = [];
+        try {
+            const r = await api('GET', `/messages?userId=${myId}`);
+            received = r?.data || [];
+        } catch {}
+
+        // Merge with sent message cache
+        const allMsgs = [...received, ..._sentMessages];
+        const seen = new Set();
+        const all = allMsgs
+            .filter(m => {
+                const key = m.id || `${m.fromId||m.from_id}-${m.toId||m.to_id}-${m.body}`;
+                if (seen.has(key)) return false; seen.add(key); return true;
+            })
+            .filter(m => {
+                const fid = parseInt(m.from_id ?? m.fromId ?? 0);
+                const tid = parseInt(m.to_id   ?? m.toId   ?? 0);
+                return (fid === myId && tid === pid) || (fid === pid && tid === myId);
+            })
+            .sort((a, b) => new Date(a.created_at || a._localTime || 0) - new Date(b.created_at || b._localTime || 0));
+
+        // Mark received messages as read
+        all.filter(m => !(m.is_read || m.isRead) && parseInt(m.to_id ?? m.toId ?? 0) === myId)
+           .forEach(m => { if (m.id) api('PUT', `/messages/${m.id}/read`, {}).catch(() => {}); });
+
+        if (!all.length) {
+            threadArea.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-secondary)">
+                <div style="font-size:2rem;margin-bottom:0.5rem">💬</div>
+                <p>No messages yet. Send the first one!</p></div>`;
+        } else {
+            threadArea.innerHTML = all.map(m => {
+                const fid    = parseInt(m.from_id ?? m.fromId ?? 0);
+                const isMine = fid === myId;
+                const sender = isMine ? 'You' : partnerName;
+                const time   = m.created_at ? new Date(m.created_at).toLocaleString() : 'Just now';
+                return `<div style="display:flex;flex-direction:column;align-items:${isMine?'flex-end':'flex-start'};margin-bottom:1rem">
+                    <div style="max-width:75%;background:${isMine?'var(--primary)':'var(--bg-secondary)'};color:${isMine?'#fff':'var(--text-primary)'};padding:0.65rem 0.9rem;border-radius:${isMine?'12px 12px 2px 12px':'12px 12px 12px 2px'};font-size:0.875rem;line-height:1.4">
+                        ${m.subject && m.subject !== 'Message' ? `<div style="font-weight:600;margin-bottom:0.25rem;font-size:0.8rem;opacity:0.85">${m.subject}</div>` : ''}
+                        ${m.body || ''}
+                    </div>
+                    <div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.2rem">${sender} · ${time}</div>
+                </div>`;
+            }).join('');
+            threadArea.scrollTop = threadArea.scrollHeight;
+        }
+
+        await loadConversations();
+    } catch(e) {
+        threadArea.innerHTML = `<div style="color:var(--text-secondary);padding:1rem">Could not load: ${e.message}</div>`;
+    }
+}
+window.openThread = openThread;
+
+async function _postMessage(fromId, toId, subject, body) {
+    // Controller reads Map<String,Object> with literal keys "fromId" and "toId" (camelCase)
+    return await api('POST', '/messages', { fromId, toId, subject: subject || 'Message', body });
+}
+
+async function sendMsgReply() {
+    if (!_msgCurrentThread) return;
+    const text = document.getElementById('msgReplyText')?.value?.trim();
+    if (!text) { showToast('Write a message first ⚠️', 'error'); return; }
+    try {
+        const saved = await _postMessage(currentUser.id, _msgCurrentThread.partnerId, 'Message', text);
+        const el = document.getElementById('msgReplyText');
+        if (el) el.value = '';
+        // Cache the sent message locally so it appears in the thread immediately
+        const sentMsg = saved?.data || {
+            id: Date.now(), fromId: currentUser.id, toId: _msgCurrentThread.partnerId,
+            from_id: currentUser.id, to_id: _msgCurrentThread.partnerId,
+            body: text, subject: 'Message', is_read: true, _localTime: new Date().toISOString()
+        };
+        _sentMessages.push(sentMsg);
+        showToast('Message sent ✓');
+        await openThread(_msgCurrentThread.partnerId, _msgCurrentThread.partnerName);
+    } catch(e) { showToast(`Send failed: ${e.message}`, 'error'); }
+}
+window.sendMsgReply = sendMsgReply;
+
+async function openComposeMessage() {
+    const modal = document.getElementById('composeModal');
+    if (!modal) return;
+    // Always reload users so recipients are fresh
+    if (!allUsers.length) {
+        try { const r = await api('GET','/users'); allUsers = r.data || []; } catch {}
+    }
+    const sel = document.getElementById('composeTo');
+    const searchBox = document.getElementById('composeToSearch');
+    if (sel) {
+        _populateComposeRecipients('');
+    }
+    if (searchBox) {
+        searchBox.value = '';
+        searchBox.oninput = () => _populateComposeRecipients(searchBox.value);
+    }
+    modal.classList.add('active');
+}
+
+function _populateComposeRecipients(query) {
+    const sel = document.getElementById('composeTo');
+    if (!sel) return;
+    const q = (query||'').toLowerCase();
+    let recipients = _getAllowedRecipients();
+    if (q) recipients = recipients.filter(u =>
+        u.name.toLowerCase().includes(q) ||
+        (u.role||'').toLowerCase().includes(q) ||
+        (u.employeeId||u.employee_id||'').toLowerCase().includes(q)
+    );
+    if (!recipients.length) {
+        sel.innerHTML = '<option value="">No matching recipients</option>';
+    } else {
+        sel.innerHTML = recipients.map(u =>
+            `<option value="${u.id}">${u.name} — ${u.role} ${u.employeeId||u.employee_id||''}</option>`
+        ).join('');
+    }
+}
+window._populateComposeRecipients = _populateComposeRecipients;
+window.openComposeMessage = openComposeMessage;
+
+async function sendComposedMessage() {
+    const toId   = parseInt(document.getElementById('composeTo')?.value);
+    const subj   = document.getElementById('composeSubject')?.value?.trim() || `Message from ${currentUser.name}`;
+    const body   = document.getElementById('composeBody')?.value?.trim();
+    if (!body)  { showToast('Write a message first ⚠️', 'error'); return; }
+    if (!toId)  { showToast('Select a recipient ⚠️', 'error'); return; }
+    try {
+        const savedMsg = await _postMessage(currentUser.id, toId, subj, body);
+        // Cache locally so it shows up immediately in the thread
+        const sentMsg = savedMsg?.data || {
+            id: Date.now(), fromId: currentUser.id, toId,
+            from_id: currentUser.id, to_id: toId,
+            body, subject: subj, is_read: true, _localTime: new Date().toISOString()
+        };
+        _sentMessages.push(sentMsg);
+        closeModal('composeModal');
+        const partner = allUsers.find(u => u.id === toId);
+        showToast(`Message sent to ${partner?.name || 'recipient'} ✓`);
+        // Reopen thread to show the sent message
+        if (partner) {
+            _msgCurrentThread = { partnerId: toId, partnerName: partner.name };
+            await loadConversations();
+            await openThread(toId, partner.name);
+        }
+    } catch(e) { showToast(`Send failed: ${e.message}`, 'error'); }
+}
+window.sendComposedMessage = sendComposedMessage;
+
+// Legacy openMessageModal kept for manager workload quick-message buttons
+async function openMessageModal(userId) {
+    _msgCurrentThread = null;
+    const user = allUsers.find(u => u.id === userId);
+    if (!user) return;
+    await openMessaging();
+    // Auto-open that person's thread
+    setTimeout(() => openThread(userId, user.name), 300);
+}
+// sendMessage kept as alias
+async function sendMessage(userId) { openMessageModal(userId); }
+
+window.openMessageModal = openMessageModal;
+window.sendMessage      = sendMessage;
+
+// ============================================================
+//  ADMIN EDIT PROFILE (admin only)
+// ============================================================
+function openAdminEditProfileModal() {
+    const u = currentUser;
+    if (!u || u.role !== 'admin') return;
+    const sv = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+    sv('adminEditName',   u.name);
+    sv('adminEditEmail',  u.email);
+    sv('adminEditDept',   u.departmentName || u.department_name || '');
+    sv('adminEditSkills', parseSkills(u.skills).join(', '));
+    document.getElementById('adminEditProfileModal')?.classList.add('active');
+}
+window.openAdminEditProfileModal = openAdminEditProfileModal;
+
+async function saveAdminProfile() {
+    const name   = document.getElementById('adminEditName')?.value?.trim();
+    const email  = document.getElementById('adminEditEmail')?.value?.trim();
+    const dept   = document.getElementById('adminEditDept')?.value?.trim();
+    const skills = parseSkills(document.getElementById('adminEditSkills')?.value || '');
+    if (!name || !email) { showToast('Name and email are required', 'error'); return; }
+    try {
+        const u = currentUser;
+        // UserService.update reads camelCase Map keys
+        await api('PUT', `/users/${u.id}`, {
+            name, email,
+            role:           u.role,
+            departmentName: dept,
+            workload:       u.workload || 0,
+            hoursPerWeek:   u.hoursPerWeek || u.hours_per_week || 40,
+            performanceScore: u.performanceScore || u.performance_score || 80,
+            requestorId:    u.id,
+            requestorName:  u.name
+        });
+        currentUser.name  = name;
+        currentUser.email = email;
+        currentUser.departmentName = dept;
+        currentUser.skills = skills;
+        closeModal('adminEditProfileModal');
+        renderAdminProfile();
+        showToast('Profile updated ✓');
+    } catch(e) { showToast(`Failed: ${e.message}`, 'error'); }
+}
+window.saveAdminProfile = saveAdminProfile;
+
+// ============================================================
+//  COMMENT REPLY SYSTEM (inline replies under any comment)
+// ============================================================
+async function replyToComment(parentCommentId, projectId, role) {
+    const replyBox = document.getElementById(`reply-input-${parentCommentId}`);
+    const text = replyBox?.value?.trim();
+    if (!text) { showToast('Write a reply first ⚠️', 'error'); return; }
+    try {
+        await api('POST', `/projects/${projectId}/comments`, {
+            projectId,
+            authorId:   currentUser.id,
+            authorName: currentUser.name,
+            authorRole: currentUser.role,
+            commentText: `↩ Reply to comment: ${text}`,
+            parentId: parentCommentId
+        }).catch(()=> api('POST', '/comments', {
+            projectId,
+            authorId:   currentUser.id,
+            authorName: currentUser.name,
+            authorRole: currentUser.role,
+            commentText: `↩ Reply: ${text}`,
+            parentId: parentCommentId
+        }));
+        showToast('Reply posted ✓');
+        await openProjectDetail(projectId, role);
+    } catch(e) { showToast(`Reply failed: ${e.message}`, 'error'); }
+}
+window.replyToComment = replyToComment;
+
+function toggleReplyBox(commentId) {
+    const box = document.getElementById(`reply-box-${commentId}`);
+    if (!box) return;
+    box.style.display = box.style.display === 'none' ? 'flex' : 'none';
+    if (box.style.display === 'flex') {
+        box.querySelector('textarea')?.focus();
+    }
+}
+window.toggleReplyBox = toggleReplyBox;
+
 window.loadProjectsFromDB = loadProjectsFromDB;
-window.loadEmployeesFromDB = loadEmployeesFromDB;
-window.managerProjectCard = managerProjectCard;
 // HR assignment
 window.selectAssignmentProject = selectAssignmentProject;
 window.toggleDeptSelection = toggleDeptSelection;
