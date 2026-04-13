@@ -121,7 +121,6 @@
     -webkit-text-fill-color: transparent;
     background-clip: text;
 }
-
 [data-theme="dark"] .hero-badge {
     background: #111;
     color: #ccc;

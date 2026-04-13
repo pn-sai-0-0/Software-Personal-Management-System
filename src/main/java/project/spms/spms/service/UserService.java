@@ -27,7 +27,6 @@ public class UserService {
     @Autowired
     private AuditService audit;
 
-    // ── LOGIN ──────────────────────────────────────────────────────────────────
     public Optional<User> login(String username, String role, String rawPassword) {
         User.Role r;
         try {

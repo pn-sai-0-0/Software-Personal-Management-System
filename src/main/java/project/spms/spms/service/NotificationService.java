@@ -12,7 +12,6 @@ public class NotificationService {
     @Autowired
     private NotificationRepository notifRepo;
 
-    /** Send a notification to a single user. */
     @Transactional
     public Notification send(Integer userId, String title, String message,
             Notification.NotifType type, String link) {

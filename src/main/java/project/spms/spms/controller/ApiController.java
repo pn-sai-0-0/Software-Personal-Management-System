@@ -56,10 +56,6 @@ public class ApiController {
     @Autowired
     private AppSettingRepository settingRepo;
 
-    // ════════════════════════════════════════════════════════════
-    // AUTH — POST /api/auth/login | POST /api/auth/logout
-    // ════════════════════════════════════════════════════════════
-
     @PostMapping("/auth/login")
     public ResponseEntity<ApiResponse> login(@RequestBody LoginRequest req) {
         try {

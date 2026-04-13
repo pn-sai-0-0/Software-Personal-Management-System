@@ -4,10 +4,6 @@ import lombok.Data;
 import project.spms.spms.entity.*;
 import java.util.List;
 
-/**
- * Full project detail returned by GET /api/projects/{id}
- * Includes team members, files, comments, and activity history.
- */
 @Data
 public class ProjectDetailDto {
     private Integer id;

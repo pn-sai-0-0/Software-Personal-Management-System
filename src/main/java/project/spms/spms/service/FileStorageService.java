@@ -16,11 +16,6 @@ public class FileStorageService {
     @Value("${spms.upload.path:./uploads}")
     private String uploadPath;
 
-    /**
-     * Save a file to disk.
-     * Returns the relative filepath stored in the DB, e.g.
-     * "uploads/projects/1/uuid_filename.pdf"
-     */
     public String store(MultipartFile file, Integer projectId) throws IOException {
         Path dir = Paths.get(uploadPath, "projects", String.valueOf(projectId));
         Files.createDirectories(dir);

@@ -1,6 +1,5 @@
 const API = 'https://spms-backend-hbad.onrender.com/api';
 
-// ── Application State ──────────────────────────────────────
 let currentUser = null;
 let currentTheme = 'light';
 let selectedProject = null;
